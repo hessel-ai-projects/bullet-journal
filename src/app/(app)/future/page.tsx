@@ -1,13 +1,13 @@
+import { FutureLog } from '@/components/future-log';
+
 export default function FutureLogPage() {
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Future Log</h1>
-        <p className="text-muted-foreground text-sm">Long-term planning</p>
+        <p className="text-muted-foreground text-sm">Plan ahead — next 6 months</p>
       </div>
-      <p className="text-muted-foreground text-sm py-8 text-center">
-        Future log view coming in Phase 2.
-      </p>
+      <FutureLog />
     </div>
   );
 }

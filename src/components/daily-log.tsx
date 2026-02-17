@@ -1,148 +1,418 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
-import type { Entry, EntryType } from '@/lib/types';
+import { toast } from 'sonner';
+import type { Entry, EntryType, EntryStatus } from '@/lib/types';
+import {
+  parseEntryPrefix,
+  bulletSymbol,
+  nextStatus,
+  createEntry,
+  updateEntry,
+  deleteEntry,
+  fetchEntriesForDate,
+  fetchIncompleteFromPast,
+  migrateEntry,
+  migrateAllIncomplete,
+} from '@/lib/entries';
 
-const typeIcons: Record<EntryType, string> = {
-  task: '•',
-  event: '○',
-  note: '–',
-};
+function formatDate(dateStr: string) {
+  const d = new Date(dateStr + 'T12:00:00');
+  return d.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+}
 
-const statusStyles: Record<string, string> = {
+function addDays(dateStr: string, n: number) {
+  const d = new Date(dateStr + 'T12:00:00');
+  d.setDate(d.getDate() + n);
+  return d.toISOString().split('T')[0];
+}
+
+function statusIcon(entry: Entry) {
+  if (entry.status === 'done') return '×';
+  if (entry.status === 'migrated') return '>';
+  if (entry.status === 'scheduled') return '<';
+  return bulletSymbol[entry.type];
+}
+
+const statusStyles: Record<EntryStatus, string> = {
+  open: '',
   done: 'line-through text-muted-foreground',
   migrated: 'text-muted-foreground italic',
-  scheduled: 'text-muted-foreground',
+  scheduled: 'text-muted-foreground italic',
 };
 
-export function DailyLog({ initialEntries, date }: { initialEntries: Entry[]; date: string }) {
+interface DailyLogProps {
+  initialEntries: Entry[];
+  date: string;
+}
+
+export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
+  const [date, setDate] = useState(initialDate);
   const [entries, setEntries] = useState<Entry[]>(initialEntries);
-  const [newContent, setNewContent] = useState('');
-  const [newType, setNewType] = useState<EntryType>('task');
+  const [pastIncomplete, setPastIncomplete] = useState<Entry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [input, setInput] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editContent, setEditContent] = useState('');
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const editRef = useRef<HTMLInputElement>(null);
+  const [indentLevel, setIndentLevel] = useState(0);
 
-  const supabase = createClient();
+  const today = new Date().toISOString().split('T')[0];
 
-  const addEntry = async () => {
-    if (!newContent.trim()) return;
+  const loadEntries = useCallback(async (d: string) => {
+    setLoading(true);
+    const [fetched, incomplete] = await Promise.all([
+      fetchEntriesForDate(d),
+      d === today ? fetchIncompleteFromPast(d) : Promise.resolve([]),
+    ]);
+    setEntries(fetched);
+    setPastIncomplete(incomplete);
+    setLoading(false);
+  }, [today]);
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+  useEffect(() => {
+    if (date !== initialDate) {
+      loadEntries(date);
+    }
+  }, [date, initialDate, loadEntries]);
 
-    const { data, error } = await supabase
-      .from('entries')
-      .insert({
-        user_id: user.id,
-        type: newType,
-        content: newContent.trim(),
-        log_type: 'daily',
-        date,
-        position: entries.length,
+  // Realtime subscription
+  useEffect(() => {
+    const supabase = createClient();
+    const channel = supabase
+      .channel('entries-daily')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'entries',
+        filter: `date=eq.${date}`,
+      }, () => {
+        loadEntries(date);
       })
-      .select()
-      .single();
+      .subscribe();
 
-    if (data && !error) {
-      setEntries([...entries, data as Entry]);
-      setNewContent('');
+    return () => { supabase.removeChannel(channel); };
+  }, [date, loadEntries]);
+
+  const handleAdd = async () => {
+    if (!input.trim()) return;
+    const { type, content } = parseEntryPrefix(input);
+    
+    // Find parent based on indent
+    let parentId: string | null = null;
+    if (indentLevel > 0 && entries.length > 0) {
+      // Find the last entry at a lower indent level
+      const rootEntries = entries.filter(e => !e.parent_id);
+      if (rootEntries.length > 0) {
+        parentId = rootEntries[rootEntries.length - 1].id;
+      }
+    }
+
+    const entry = await createEntry({
+      type,
+      content,
+      log_type: 'daily',
+      date,
+      position: entries.length,
+      parent_id: parentId,
+    });
+    if (entry) {
+      setEntries(prev => [...prev, entry]);
+      setInput('');
+      setIndentLevel(0);
     }
   };
 
-  const toggleStatus = async (entry: Entry) => {
-    const newStatus = entry.status === 'done' ? 'open' : 'done';
-    const { error } = await supabase
-      .from('entries')
-      .update({ status: newStatus })
-      .eq('id', entry.id);
-
-    if (!error) {
-      setEntries(entries.map((e) =>
-        e.id === entry.id ? { ...e, status: newStatus } : e
-      ));
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleAdd();
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      if (e.shiftKey) {
+        setIndentLevel(prev => Math.max(0, prev - 1));
+      } else {
+        setIndentLevel(prev => Math.min(2, prev + 1));
+      }
     }
   };
 
-  const deleteEntry = async (id: string) => {
-    const { error } = await supabase.from('entries').delete().eq('id', id);
-    if (!error) {
-      setEntries(entries.filter((e) => e.id !== id));
+  const handleStatusCycle = async (entry: Entry) => {
+    const newStatus = nextStatus(entry.status);
+    const ok = await updateEntry(entry.id, { status: newStatus });
+    if (ok) {
+      setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: newStatus } : e));
     }
   };
+
+  const handleDelete = async (id: string) => {
+    const ok = await deleteEntry(id);
+    if (ok) {
+      setEntries(prev => prev.filter(e => e.id !== id));
+      toast('Entry deleted');
+    }
+  };
+
+  const startEdit = (entry: Entry) => {
+    setEditingId(entry.id);
+    setEditContent(entry.content);
+    setTimeout(() => editRef.current?.focus(), 50);
+  };
+
+  const finishEdit = async () => {
+    if (!editingId) return;
+    if (editContent.trim()) {
+      const ok = await updateEntry(editingId, { content: editContent.trim() });
+      if (ok) {
+        setEntries(prev => prev.map(e => e.id === editingId ? { ...e, content: editContent.trim() } : e));
+      }
+    }
+    setEditingId(null);
+  };
+
+  const handleMigrate = async (entry: Entry) => {
+    const result = await migrateEntry(entry.id, today);
+    if (result) {
+      toast('Entry migrated to today');
+      loadEntries(date);
+    }
+  };
+
+  const handleMigrateAll = async () => {
+    const count = await migrateAllIncomplete(today, today);
+    toast(`Migrated ${count} entries to today`);
+    loadEntries(date);
+  };
+
+  const navigateDate = (d: string) => {
+    setDate(d);
+    setEditingId(null);
+    setInput('');
+    setIndentLevel(0);
+  };
+
+  const getDepth = (entry: Entry): number => {
+    return entry.parent_id ? 1 : 0;
+  };
+
+  // Organize entries: parents first, then children under them
+  const organizedEntries = () => {
+    const roots = entries.filter(e => !e.parent_id);
+    const result: Entry[] = [];
+    for (const root of roots) {
+      result.push(root);
+      const children = entries.filter(e => e.parent_id === root.id);
+      result.push(...children);
+    }
+    // Add any orphans
+    const ids = new Set(result.map(e => e.id));
+    for (const e of entries) {
+      if (!ids.has(e.id)) result.push(e);
+    }
+    return result;
+  };
+
+  // Touch handling for swipe-to-delete
+  const [touchStart, setTouchStart] = useState<{ id: string; x: number } | null>(null);
+  const [swipedId, setSwipedId] = useState<string | null>(null);
 
   return (
     <div className="space-y-4">
-      {/* Entry list */}
-      <div className="space-y-1">
-        {entries.length === 0 && (
-          <p className="text-muted-foreground text-sm py-8 text-center">
-            No entries yet. Start logging your day.
-          </p>
+      {/* Date navigation */}
+      <div className="flex items-center gap-2">
+        <Button variant="ghost" size="sm" onClick={() => navigateDate(addDays(date, -1))}>
+          ←
+        </Button>
+        <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+          <PopoverTrigger asChild>
+            <Button variant="outline" size="sm" className="min-w-[200px]">
+              {formatDate(date)}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0" align="center">
+            <Calendar
+              mode="single"
+              selected={new Date(date + 'T12:00:00')}
+              onSelect={(d) => {
+                if (d) {
+                  navigateDate(d.toISOString().split('T')[0]);
+                  setCalendarOpen(false);
+                }
+              }}
+            />
+          </PopoverContent>
+        </Popover>
+        <Button variant="ghost" size="sm" onClick={() => navigateDate(addDays(date, 1))}>
+          →
+        </Button>
+        {date !== today && (
+          <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" onClick={() => navigateDate(today)}>
+            Today
+          </Button>
         )}
-        {entries.map((entry) => (
-          <div
-            key={entry.id}
-            className="group flex items-start gap-3 py-2 px-3 rounded-md hover:bg-accent/50 transition-colors"
-          >
-            <button
-              onClick={() => toggleStatus(entry)}
-              className="mt-0.5 text-lg leading-none shrink-0 hover:opacity-70"
-              title={entry.type}
-            >
-              {entry.status === 'done' ? '✕' : typeIcons[entry.type]}
-            </button>
-            <span className={cn('flex-1 text-sm', statusStyles[entry.status])}>
-              {entry.content}
-            </span>
-            {entry.tags.length > 0 && (
-              <div className="flex gap-1">
-                {entry.tags.map((tag) => (
-                  <Badge key={tag} variant="secondary" className="text-xs">
-                    {tag}
-                  </Badge>
-                ))}
-              </div>
-            )}
-            {entry.source !== 'user' && (
-              <Badge variant="outline" className="text-xs opacity-50">
-                {entry.source}
-              </Badge>
-            )}
-            <button
-              onClick={() => deleteEntry(entry.id)}
-              className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive text-xs transition-opacity"
-            >
-              ✕
-            </button>
-          </div>
-        ))}
       </div>
 
-      {/* New entry input */}
-      <div className="flex items-center gap-2 border rounded-md p-2">
-        <select
-          value={newType}
-          onChange={(e) => setNewType(e.target.value as EntryType)}
-          className="bg-transparent text-sm border-none outline-none"
-        >
-          <option value="task">• Task</option>
-          <option value="event">○ Event</option>
-          <option value="note">– Note</option>
-        </select>
+      {/* Rapid logging input */}
+      <div className="flex items-center gap-2 border rounded-md p-2 bg-card">
+        {indentLevel > 0 && (
+          <span className="text-muted-foreground text-xs">{'→'.repeat(indentLevel)}</span>
+        )}
         <input
+          ref={inputRef}
           type="text"
-          value={newContent}
-          onChange={(e) => setNewContent(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && addEntry()}
-          placeholder="Add an entry..."
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Type and press Enter • prefix: - note, o event"
           className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          autoFocus
         />
-        <Button size="sm" variant="ghost" onClick={addEntry}>
-          Add
-        </Button>
       </div>
+
+      {/* Past incomplete tasks */}
+      {pastIncomplete.length > 0 && date === today && (
+        <div className="border border-yellow-500/20 rounded-md p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-yellow-500">
+              {pastIncomplete.length} incomplete from previous days
+            </span>
+            <Button variant="ghost" size="sm" className="text-xs h-7" onClick={handleMigrateAll}>
+              Migrate all to today
+            </Button>
+          </div>
+          {pastIncomplete.slice(0, 5).map(entry => (
+            <div key={entry.id} className="flex items-center gap-3 py-1 px-2 text-sm text-muted-foreground">
+              <span className="text-xs opacity-50">{entry.date}</span>
+              <span>{bulletSymbol[entry.type]}</span>
+              <span className="flex-1 truncate">{entry.content}</span>
+              <Button variant="ghost" size="sm" className="text-xs h-6 px-2" onClick={() => handleMigrate(entry)}>
+                Migrate
+              </Button>
+            </div>
+          ))}
+          {pastIncomplete.length > 5 && (
+            <p className="text-xs text-muted-foreground px-2">
+              +{pastIncomplete.length - 5} more
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Entry list */}
+      {loading ? (
+        <div className="space-y-2">
+          {[...Array(5)].map((_, i) => (
+            <Skeleton key={i} className="h-8 w-full" />
+          ))}
+        </div>
+      ) : (
+        <div className="space-y-0.5">
+          {entries.length === 0 && !loading && (
+            <p className="text-muted-foreground text-sm py-8 text-center">
+              No entries yet. Start logging your day.
+            </p>
+          )}
+          {organizedEntries().map((entry) => {
+            const depth = getDepth(entry);
+            const isSwiped = swipedId === entry.id;
+            return (
+              <div
+                key={entry.id}
+                className={cn(
+                  'group flex items-start gap-2 py-1.5 px-2 rounded-md hover:bg-accent/50 transition-all relative',
+                  isSwiped && 'translate-x-[-60px]'
+                )}
+                style={{ paddingLeft: `${8 + depth * 24}px` }}
+                onTouchStart={(e) => setTouchStart({ id: entry.id, x: e.touches[0].clientX })}
+                onTouchMove={(e) => {
+                  if (touchStart?.id === entry.id) {
+                    const diff = touchStart.x - e.touches[0].clientX;
+                    if (diff > 60) setSwipedId(entry.id);
+                    else setSwipedId(null);
+                  }
+                }}
+                onTouchEnd={() => setTouchStart(null)}
+              >
+                <button
+                  onClick={() => handleStatusCycle(entry)}
+                  className={cn(
+                    'mt-0.5 w-5 h-5 flex items-center justify-center text-sm shrink-0 rounded hover:bg-accent transition-colors cursor-pointer',
+                    entry.status === 'done' && 'text-muted-foreground',
+                    entry.status === 'migrated' && 'text-muted-foreground',
+                    entry.status === 'scheduled' && 'text-muted-foreground',
+                  )}
+                  title={`${entry.type} — ${entry.status}`}
+                >
+                  {statusIcon(entry)}
+                </button>
+                
+                {editingId === entry.id ? (
+                  <input
+                    ref={editRef}
+                    value={editContent}
+                    onChange={(e) => setEditContent(e.target.value)}
+                    onBlur={finishEdit}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') finishEdit();
+                      if (e.key === 'Escape') setEditingId(null);
+                    }}
+                    className="flex-1 bg-transparent text-sm outline-none border-b border-primary/20"
+                  />
+                ) : (
+                  <span
+                    onClick={() => startEdit(entry)}
+                    className={cn(
+                      'flex-1 text-sm cursor-text transition-colors',
+                      statusStyles[entry.status]
+                    )}
+                  >
+                    {entry.content}
+                  </span>
+                )}
+
+                {/* Actions */}
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  {entry.status === 'open' && entry.type === 'task' && date !== today && (
+                    <button
+                      onClick={() => handleMigrate(entry)}
+                      className="text-xs text-muted-foreground hover:text-foreground px-1"
+                      title="Migrate to today"
+                    >
+                      →
+                    </button>
+                  )}
+                  <button
+                    onClick={() => handleDelete(entry.id)}
+                    className="text-xs text-muted-foreground hover:text-destructive px-1"
+                    title="Delete"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* Swipe delete button (mobile) */}
+                {isSwiped && (
+                  <button
+                    onClick={() => { handleDelete(entry.id); setSwipedId(null); }}
+                    className="absolute right-0 top-0 bottom-0 w-[56px] bg-destructive text-destructive-foreground flex items-center justify-center text-xs rounded-r-md"
+                  >
+                    Delete
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
