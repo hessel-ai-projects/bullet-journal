@@ -164,6 +164,57 @@ export async function migrateAllIncomplete(fromBefore: string, toDate: string): 
   return count;
 }
 
+export async function assignMonthlyTaskToDay(
+  monthlyEntry: Entry,
+  day: number,
+  year: number,
+  month: number
+): Promise<Entry | null> {
+  const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  
+  // Get count of existing entries for that day (for position)
+  const existing = await fetchEntriesForDate(dateStr);
+  
+  // Create daily entry linked to the monthly task
+  const dailyEntry = await createEntry({
+    type: monthlyEntry.type,
+    content: monthlyEntry.content,
+    log_type: 'daily',
+    date: dateStr,
+    position: existing.length,
+    parent_id: monthlyEntry.id,
+  });
+  
+  if (dailyEntry) {
+    // Mark the monthly task as scheduled
+    await updateEntry(monthlyEntry.id, { status: 'scheduled' });
+  }
+  
+  return dailyEntry;
+}
+
+export async function fetchAssignedDays(monthlyEntryId: string): Promise<string[]> {
+  const { data } = await supabase()
+    .from('entries')
+    .select('date')
+    .eq('parent_id', monthlyEntryId)
+    .eq('log_type', 'daily');
+  return (data ?? []).map((d: { date: string }) => d.date);
+}
+
+export async function fetchUnassignedMonthlyTasks(year: number, month: number): Promise<Entry[]> {
+  const monthStr = `${year}-${String(month).padStart(2, '0')}-01`;
+  const { data } = await supabase()
+    .from('entries')
+    .select('*')
+    .eq('log_type', 'monthly')
+    .eq('date', monthStr)
+    .eq('type', 'task')
+    .in('status', ['open'])
+    .order('position', { ascending: true });
+  return (data ?? []) as Entry[];
+}
+
 export async function fetchIncompleteFromPast(beforeDate: string): Promise<Entry[]> {
   const { data } = await supabase()
     .from('entries')

@@ -7,6 +7,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import type { Entry, EntryType } from '@/lib/types';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Badge } from '@/components/ui/badge';
 import {
   bulletSymbol,
   parseEntryPrefix,
@@ -16,6 +18,8 @@ import {
   updateEntry,
   deleteEntry,
   nextStatus,
+  assignMonthlyTaskToDay,
+  fetchAssignedDays,
 } from '@/lib/entries';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -35,6 +39,8 @@ export function MonthlyLog() {
   const [monthlyTasks, setMonthlyTasks] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
   const [input, setInput] = useState('');
+  const [assignedDaysMap, setAssignedDaysMap] = useState<Record<string, string[]>>({});
+  const [assigningId, setAssigningId] = useState<string | null>(null);
 
   const monthName = new Date(year, month - 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   const daysInMonth = new Date(year, month, 0).getDate();
@@ -51,6 +57,37 @@ export function MonthlyLog() {
   }, [year, month]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Load assigned days for all monthly tasks
+  useEffect(() => {
+    if (monthlyTasks.length === 0) return;
+    const loadAssigned = async () => {
+      const map: Record<string, string[]> = {};
+      await Promise.all(
+        monthlyTasks.map(async (t) => {
+          const days = await fetchAssignedDays(t.id);
+          if (days.length > 0) map[t.id] = days;
+        })
+      );
+      setAssignedDaysMap(map);
+    };
+    loadAssigned();
+  }, [monthlyTasks]);
+
+  const handleAssignToDay = async (entry: Entry, day: number) => {
+    const result = await assignMonthlyTaskToDay(entry, day, year, month);
+    if (result) {
+      toast(`Assigned to day ${day}`);
+      setAssigningId(null);
+      // Update local state
+      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      setAssignedDaysMap(prev => ({
+        ...prev,
+        [entry.id]: [...(prev[entry.id] || []), dateStr],
+      }));
+      setMonthlyTasks(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'scheduled' } : e));
+    }
+  };
 
   const navigate = (dir: number) => {
     let m = month + dir;
@@ -182,28 +219,79 @@ export function MonthlyLog() {
             {monthlyTasks.length === 0 && (
               <p className="text-muted-foreground text-xs py-4 text-center">No monthly tasks yet.</p>
             )}
-            {monthlyTasks.map(entry => (
-              <div key={entry.id} className="group flex items-center gap-2 py-1.5 px-2 rounded hover:bg-accent/50 transition-colors">
-                <button
-                  onClick={() => handleStatusCycle(entry)}
-                  className="w-5 h-5 flex items-center justify-center text-sm shrink-0"
-                >
-                  {statusIcon(entry)}
-                </button>
-                <span className={cn(
-                  'flex-1 text-sm',
-                  entry.status === 'done' && 'line-through text-muted-foreground',
-                )}>
-                  {entry.content}
-                </span>
-                <button
-                  onClick={() => handleDelete(entry.id)}
-                  className="opacity-0 group-hover:opacity-100 text-xs text-muted-foreground hover:text-destructive transition-opacity"
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
+            {monthlyTasks.map(entry => {
+              const assigned = assignedDaysMap[entry.id] || [];
+              const assignedDayNums = assigned.map(d => parseInt(d.split('-')[2], 10));
+              return (
+                <div key={entry.id} className="group flex items-start gap-2 py-1.5 px-2 rounded hover:bg-accent/50 transition-colors">
+                  <button
+                    onClick={() => handleStatusCycle(entry)}
+                    className="w-5 h-5 flex items-center justify-center text-sm shrink-0 mt-0.5"
+                  >
+                    {statusIcon(entry)}
+                  </button>
+                  <div className="flex-1 min-w-0">
+                    <span className={cn(
+                      'text-sm',
+                      entry.status === 'done' && 'line-through text-muted-foreground',
+                      entry.status === 'scheduled' && 'text-muted-foreground italic',
+                    )}>
+                      {entry.content}
+                    </span>
+                    {assignedDayNums.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-0.5">
+                        {assignedDayNums.map(d => (
+                          <Badge key={d} variant="secondary" className="text-[10px] px-1 py-0 h-4 cursor-pointer" onClick={() => goToDay(d)}>
+                            Day {d}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                    {entry.type === 'task' && entry.status !== 'done' && (
+                      <Popover open={assigningId === entry.id} onOpenChange={(open) => setAssigningId(open ? entry.id : null)}>
+                        <PopoverTrigger asChild>
+                          <button
+                            className="text-xs text-muted-foreground hover:text-foreground px-1"
+                            title="Assign to day"
+                          >
+                            📅
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-2" align="end">
+                          <p className="text-xs font-medium mb-2">Assign to day:</p>
+                          <div className="grid grid-cols-7 gap-1">
+                            {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(d => {
+                              const isAssigned = assignedDayNums.includes(d);
+                              return (
+                                <button
+                                  key={d}
+                                  disabled={isAssigned}
+                                  onClick={() => handleAssignToDay(entry, d)}
+                                  className={cn(
+                                    'w-7 h-7 text-xs rounded hover:bg-accent transition-colors',
+                                    isAssigned && 'bg-primary/20 text-muted-foreground cursor-not-allowed',
+                                  )}
+                                >
+                                  {d}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                    )}
+                    <button
+                      onClick={() => handleDelete(entry.id)}
+                      className="text-xs text-muted-foreground hover:text-destructive px-1"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>

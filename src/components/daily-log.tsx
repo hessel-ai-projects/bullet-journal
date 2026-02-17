@@ -10,6 +10,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import type { Entry, EntryType, EntryStatus } from '@/lib/types';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   parseEntryPrefix,
   bulletSymbol,
@@ -21,6 +23,8 @@ import {
   fetchIncompleteFromPast,
   migrateEntry,
   migrateAllIncomplete,
+  fetchUnassignedMonthlyTasks,
+  assignMonthlyTaskToDay,
 } from '@/lib/entries';
 
 function formatDate(dateStr: string) {
@@ -65,6 +69,10 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const editRef = useRef<HTMLInputElement>(null);
   const [indentLevel, setIndentLevel] = useState(0);
+  const [pullOpen, setPullOpen] = useState(false);
+  const [monthlyTasks, setMonthlyTasks] = useState<Entry[]>([]);
+  const [selectedMonthly, setSelectedMonthly] = useState<Set<string>>(new Set());
+  const [pullingMonthly, setPullingMonthly] = useState(false);
 
   const today = new Date().toISOString().split('T')[0];
 
@@ -83,6 +91,32 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
   useEffect(() => {
     loadEntries(date);
   }, [date, loadEntries]);
+
+  const loadMonthlyTasks = async () => {
+    const d = new Date(date + 'T12:00:00');
+    const tasks = await fetchUnassignedMonthlyTasks(d.getFullYear(), d.getMonth() + 1);
+    setMonthlyTasks(tasks);
+    setSelectedMonthly(new Set());
+  };
+
+  const handlePullFromMonthly = async () => {
+    if (selectedMonthly.size === 0) return;
+    setPullingMonthly(true);
+    const d = new Date(date + 'T12:00:00');
+    const dayNum = d.getDate();
+    let count = 0;
+    for (const id of Array.from(selectedMonthly)) {
+      const task = monthlyTasks.find(t => t.id === id);
+      if (task) {
+        const result = await assignMonthlyTaskToDay(task, dayNum, d.getFullYear(), d.getMonth() + 1);
+        if (result) count++;
+      }
+    }
+    setPullingMonthly(false);
+    setPullOpen(false);
+    toast(`Pulled ${count} task${count !== 1 ? 's' : ''} from monthly`);
+    loadEntries(date);
+  };
 
   // Realtime subscription
   useEffect(() => {
@@ -261,20 +295,68 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
       </div>
 
       {/* Rapid logging input */}
-      <div className="flex items-center gap-2 border rounded-md p-2 bg-card">
-        {indentLevel > 0 && (
-          <span className="text-muted-foreground text-xs">{'→'.repeat(indentLevel)}</span>
-        )}
-        <input
-          ref={inputRef}
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Type and press Enter • prefix: - note, o event"
-          className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
-          autoFocus
-        />
+      <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 border rounded-md p-2 bg-card flex-1">
+          {indentLevel > 0 && (
+            <span className="text-muted-foreground text-xs">{'→'.repeat(indentLevel)}</span>
+          )}
+          <input
+            ref={inputRef}
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Type and press Enter • prefix: - note, o event"
+            className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+            autoFocus
+          />
+        </div>
+        <Dialog open={pullOpen} onOpenChange={(open) => { setPullOpen(open); if (open) loadMonthlyTasks(); }}>
+          <DialogTrigger asChild>
+            <Button variant="outline" size="sm" className="shrink-0" title="Pull from monthly">
+              <span className="hidden sm:inline text-xs">Monthly</span>
+              <span className="sm:hidden">📋</span>
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Pull from Monthly Tasks</DialogTitle>
+            </DialogHeader>
+            {monthlyTasks.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">No unassigned monthly tasks.</p>
+            ) : (
+              <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                {monthlyTasks.map(task => (
+                  <label key={task.id} className="flex items-center gap-3 py-2 px-2 rounded hover:bg-accent/50 cursor-pointer">
+                    <Checkbox
+                      checked={selectedMonthly.has(task.id)}
+                      onCheckedChange={(checked) => {
+                        setSelectedMonthly(prev => {
+                          const next = new Set(prev);
+                          if (checked) next.add(task.id);
+                          else next.delete(task.id);
+                          return next;
+                        });
+                      }}
+                    />
+                    <span className="text-sm">{task.content}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+            {monthlyTasks.length > 0 && (
+              <div className="flex justify-end pt-2">
+                <Button
+                  size="sm"
+                  disabled={selectedMonthly.size === 0 || pullingMonthly}
+                  onClick={handlePullFromMonthly}
+                >
+                  {pullingMonthly ? 'Adding...' : `Add ${selectedMonthly.size || ''} to today`}
+                </Button>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
 
       {/* Past incomplete tasks */}
