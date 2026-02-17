@@ -8,13 +8,20 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import type { Entry } from '@/lib/types';
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
   bulletSymbol,
   parseEntryPrefix,
   fetchFutureEntries,
   createEntry,
-  updateEntry,
   deleteEntry,
-  nextStatus,
+  completeEntry,
+  cancelEntry,
+  syncStatusToChild,
 } from '@/lib/entries';
 
 function getCurrentAnd6Months() {
@@ -36,6 +43,7 @@ function statusIcon(entry: Entry) {
   if (entry.status === 'done') return '×';
   if (entry.status === 'migrated') return '>';
   if (entry.status === 'scheduled') return '<';
+  if (entry.status === 'cancelled') return '•';
   return bulletSymbol[entry.type];
 }
 
@@ -76,11 +84,21 @@ export function FutureLog() {
     }
   };
 
-  const handleStatusCycle = async (entry: Entry) => {
-    const newStatus = nextStatus(entry.status);
-    const ok = await updateEntry(entry.id, { status: newStatus });
+  const handleComplete = async (entry: Entry) => {
+    const ok = await completeEntry(entry.id);
     if (ok) {
-      setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: newStatus } : e));
+      await syncStatusToChild(entry.id, 'done');
+      setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'done' } : e));
+      toast('Completed');
+    }
+  };
+
+  const handleCancel = async (entry: Entry) => {
+    const ok = await cancelEntry(entry.id);
+    if (ok) {
+      await syncStatusToChild(entry.id, 'cancelled');
+      setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'cancelled' } : e));
+      toast('Cancelled');
     }
   };
 
@@ -121,25 +139,54 @@ export function FutureLog() {
               {monthEntries.length === 0 && (
                 <p className="text-muted-foreground text-xs py-2 text-center">No entries</p>
               )}
-              {monthEntries.map(entry => (
-                <div key={entry.id} className="group flex items-center gap-2 py-1 text-sm">
-                  <button onClick={() => handleStatusCycle(entry)} className="shrink-0 w-4 text-center">
-                    {statusIcon(entry)}
-                  </button>
-                  <span className={cn(
-                    'flex-1 truncate text-xs',
-                    entry.status === 'done' && 'line-through text-muted-foreground',
-                  )}>
-                    {entry.content}
-                  </span>
-                  <button
-                    onClick={() => handleDelete(entry.id)}
-                    className="opacity-0 group-hover:opacity-100 text-xs text-muted-foreground hover:text-destructive"
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))}
+              {monthEntries.map(entry => {
+                const isActionable = entry.status === 'open';
+                const isTask = entry.type === 'task';
+                return (
+                  <div key={entry.id} className="group flex items-center gap-2 py-1 text-sm">
+                    <span className={cn(
+                      'shrink-0 w-4 text-center',
+                      (entry.status === 'done' || entry.status === 'cancelled') && 'text-muted-foreground',
+                    )}>
+                      {statusIcon(entry)}
+                    </span>
+                    <span className={cn(
+                      'flex-1 truncate text-xs',
+                      entry.status === 'done' && 'line-through text-muted-foreground',
+                      entry.status === 'cancelled' && 'line-through text-muted-foreground/60',
+                      entry.status === 'scheduled' && 'italic text-muted-foreground',
+                    )}>
+                      {entry.content}
+                    </span>
+                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {isTask && isActionable ? (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button className="text-xs text-muted-foreground hover:text-foreground px-1" title="Actions">
+                              ⋯
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-36">
+                            <DropdownMenuItem onClick={() => handleComplete(entry)}>
+                              <span className="mr-2">✓</span> Complete
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleCancel(entry)}>
+                              <span className="mr-2">✕</span> Cancel
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      ) : (
+                        <button
+                          onClick={() => handleDelete(entry.id)}
+                          className="text-xs text-muted-foreground hover:text-destructive"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
             <input

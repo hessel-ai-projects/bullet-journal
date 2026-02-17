@@ -39,7 +39,8 @@ import {
   createActionItem,
 } from '@/lib/collections';
 import { updateEntry, deleteEntry, createEntry } from '@/lib/entries';
-import { bulletSymbol, nextStatus } from '@/lib/entries';
+import { bulletSymbol } from '@/lib/entries';
+import type { EntryStatus } from '@/lib/types';
 
 function formatDate(d: string) {
   return new Date(d + 'T12:00:00').toLocaleDateString('en-US', {
@@ -176,7 +177,9 @@ function ActionItemsSection({
   };
 
   const handleStatusCycle = async (entry: Entry) => {
-    const newStatus = nextStatus(entry.status);
+    const cycle: EntryStatus[] = ['open', 'done'];
+    const idx = cycle.indexOf(entry.status);
+    const newStatus = cycle[(idx + 1) % cycle.length];
     const ok = await updateEntry(entry.id, { status: newStatus });
     if (ok) {
       setItems((prev) => prev.map((e) => (e.id === entry.id ? { ...e, status: newStatus } : e)));

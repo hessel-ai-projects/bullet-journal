@@ -6,19 +6,28 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import type { Entry, EntryType } from '@/lib/types';
+import type { Entry } from '@/lib/types';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Badge } from '@/components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   bulletSymbol,
   parseEntryPrefix,
   fetchEntriesForMonth,
   fetchMonthlyEntries,
   createEntry,
-  updateEntry,
   deleteEntry,
-  nextStatus,
-  assignMonthlyTaskToDay,
+  completeEntry,
+  cancelEntry,
+  planToDay,
+  moveToMonth,
+  syncStatusToChild,
   fetchAssignedDays,
 } from '@/lib/entries';
 
@@ -28,7 +37,20 @@ function statusIcon(entry: Entry) {
   if (entry.status === 'done') return '×';
   if (entry.status === 'migrated') return '>';
   if (entry.status === 'scheduled') return '<';
+  if (entry.status === 'cancelled') return '•';
   return bulletSymbol[entry.type];
+}
+
+function getNext6Months(currentYear: number, currentMonth: number) {
+  const months: { label: string; dateStr: string }[] = [];
+  for (let i = 1; i <= 6; i++) {
+    const d = new Date(currentYear, currentMonth - 1 + i, 1);
+    months.push({
+      label: d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+      dateStr: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`,
+    });
+  }
+  return months;
 }
 
 export function MonthlyLog() {
@@ -40,7 +62,7 @@ export function MonthlyLog() {
   const [loading, setLoading] = useState(true);
   const [input, setInput] = useState('');
   const [assignedDaysMap, setAssignedDaysMap] = useState<Record<string, string[]>>({});
-  const [assigningId, setAssigningId] = useState<string | null>(null);
+  const [planningId, setPlanningId] = useState<string | null>(null);
 
   const monthName = new Date(year, month - 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   const daysInMonth = new Date(year, month, 0).getDate();
@@ -58,7 +80,6 @@ export function MonthlyLog() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Load assigned days for all monthly tasks
   useEffect(() => {
     if (monthlyTasks.length === 0) return;
     const loadAssigned = async () => {
@@ -74,18 +95,43 @@ export function MonthlyLog() {
     loadAssigned();
   }, [monthlyTasks]);
 
-  const handleAssignToDay = async (entry: Entry, day: number) => {
-    const result = await assignMonthlyTaskToDay(entry, day, year, month);
+  const handleComplete = async (entry: Entry) => {
+    const ok = await completeEntry(entry.id);
+    if (ok) {
+      await syncStatusToChild(entry.id, 'done');
+      setMonthlyTasks(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'done' } : e));
+      toast('Completed');
+    }
+  };
+
+  const handleCancel = async (entry: Entry) => {
+    const ok = await cancelEntry(entry.id);
+    if (ok) {
+      await syncStatusToChild(entry.id, 'cancelled');
+      setMonthlyTasks(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'cancelled' } : e));
+      toast('Cancelled');
+    }
+  };
+
+  const handlePlanToDay = async (entry: Entry, day: number) => {
+    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const result = await planToDay(entry.id, dateStr);
     if (result) {
-      toast(`Assigned to day ${day}`);
-      setAssigningId(null);
-      // Update local state
-      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      toast(`Planned to day ${day}`);
+      setPlanningId(null);
       setAssignedDaysMap(prev => ({
         ...prev,
-        [entry.id]: [...(prev[entry.id] || []), dateStr],
+        [entry.id]: [dateStr],
       }));
+      setMonthlyTasks(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'migrated' } : e));
+    }
+  };
+
+  const handleMoveToMonth = async (entry: Entry, targetDateStr: string) => {
+    const result = await moveToMonth(entry.id, targetDateStr);
+    if (result) {
       setMonthlyTasks(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'scheduled' } : e));
+      toast('Moved to ' + new Date(targetDateStr + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', year: 'numeric' }));
     }
   };
 
@@ -121,14 +167,6 @@ export function MonthlyLog() {
     }
   };
 
-  const handleStatusCycle = async (entry: Entry) => {
-    const newStatus = nextStatus(entry.status);
-    const ok = await updateEntry(entry.id, { status: newStatus });
-    if (ok) {
-      setMonthlyTasks(prev => prev.map(e => e.id === entry.id ? { ...e, status: newStatus } : e));
-    }
-  };
-
   const handleDelete = async (id: string) => {
     const ok = await deleteEntry(id);
     if (ok) {
@@ -141,6 +179,8 @@ export function MonthlyLog() {
     const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     return dailyEntries.filter(e => e.date === dateStr && e.type === 'event');
   };
+
+  const futureMonths = getNext6Months(year, month);
 
   if (loading) {
     return (
@@ -222,23 +262,28 @@ export function MonthlyLog() {
             {monthlyTasks.map(entry => {
               const assigned = assignedDaysMap[entry.id] || [];
               const assignedDayNums = assigned.map(d => parseInt(d.split('-')[2], 10));
+              const isTerminal = entry.status === 'done' || entry.status === 'cancelled' || entry.status === 'scheduled';
               return (
                 <div key={entry.id} className="group flex items-start gap-2 py-1.5 px-2 rounded hover:bg-accent/50 transition-colors">
-                  <button
-                    onClick={() => handleStatusCycle(entry)}
-                    className="w-5 h-5 flex items-center justify-center text-sm shrink-0 mt-0.5"
-                  >
+                  <span className={cn(
+                    'w-5 h-5 flex items-center justify-center text-sm shrink-0 mt-0.5',
+                    (entry.status === 'done' || entry.status === 'cancelled') && 'text-muted-foreground',
+                    entry.status === 'migrated' && 'text-blue-500 dark:text-blue-400',
+                    entry.status === 'scheduled' && 'text-muted-foreground',
+                  )}>
                     {statusIcon(entry)}
-                  </button>
+                  </span>
                   <div className="flex-1 min-w-0">
                     <span className={cn(
                       'text-sm',
                       entry.status === 'done' && 'line-through text-muted-foreground',
+                      entry.status === 'cancelled' && 'line-through text-muted-foreground/60',
                       entry.status === 'scheduled' && 'text-muted-foreground italic',
+                      entry.status === 'migrated' && 'text-foreground',
                     )}>
                       {entry.content}
                     </span>
-                    {assignedDayNums.length > 0 && (
+                    {entry.status === 'migrated' && assignedDayNums.length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-0.5">
                         {assignedDayNums.map(d => (
                           <Badge key={d} variant="secondary" className="text-[10px] px-1 py-0 h-4 cursor-pointer" onClick={() => goToDay(d)}>
@@ -248,51 +293,101 @@ export function MonthlyLog() {
                       </div>
                     )}
                   </div>
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                    {entry.type === 'task' && entry.status !== 'done' && (
-                      <Popover open={assigningId === entry.id} onOpenChange={(open) => setAssigningId(open ? entry.id : null)}>
-                        <PopoverTrigger asChild>
-                          <button
-                            className="text-xs text-muted-foreground hover:text-foreground px-1"
-                            title="Assign to day"
-                          >
-                            📅
+
+                  {/* Action buttons — visible on hover (desktop) or always (mobile via group-hover + touch) */}
+                  <div className="flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0">
+                    {entry.type === 'task' && !isTerminal && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button className="text-xs text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-accent" title="Actions">
+                            ⋯
                           </button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-2" align="end">
-                          <p className="text-xs font-medium mb-2">Assign to day:</p>
-                          <div className="grid grid-cols-7 gap-1">
-                            {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(d => {
-                              const isAssigned = assignedDayNums.includes(d);
-                              return (
-                                <button
-                                  key={d}
-                                  disabled={isAssigned}
-                                  onClick={() => handleAssignToDay(entry, d)}
-                                  className={cn(
-                                    'w-7 h-7 text-xs rounded hover:bg-accent transition-colors',
-                                    isAssigned && 'bg-primary/20 text-muted-foreground cursor-not-allowed',
-                                  )}
-                                >
-                                  {d}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </PopoverContent>
-                      </Popover>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-48">
+                          <DropdownMenuItem onClick={() => handleComplete(entry)}>
+                            <span className="mr-2">✓</span> Complete
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleCancel(entry)}>
+                            <span className="mr-2">✕</span> Cancel
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onClick={() => setPlanningId(planningId === entry.id ? null : entry.id)}>
+                            <span className="mr-2">📅</span> Plan to day
+                          </DropdownMenuItem>
+                          <DropdownMenu>
+                            <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <span className="flex items-center w-full cursor-pointer">
+                                    <span className="mr-2">→</span> Move to month
+                                  </span>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-auto p-2" align="end" side="left">
+                                  <div className="space-y-1">
+                                    {futureMonths.map(m => (
+                                      <button
+                                        key={m.dateStr}
+                                        onClick={() => handleMoveToMonth(entry, m.dateStr)}
+                                        className="block w-full text-left text-sm px-3 py-1.5 rounded hover:bg-accent transition-colors"
+                                      >
+                                        {m.label}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </PopoverContent>
+                              </Popover>
+                            </DropdownMenuItem>
+                          </DropdownMenu>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     )}
-                    <button
-                      onClick={() => handleDelete(entry.id)}
-                      className="text-xs text-muted-foreground hover:text-destructive px-1"
-                    >
-                      ✕
-                    </button>
+                    {(entry.status === 'done' || entry.status === 'cancelled' || entry.status === 'scheduled') && (
+                      <button
+                        onClick={() => handleDelete(entry.id)}
+                        className="text-xs text-muted-foreground hover:text-destructive px-1"
+                        title="Delete"
+                      >
+                        🗑
+                      </button>
+                    )}
                   </div>
                 </div>
               );
             })}
           </div>
+
+          {/* Day picker popover — shown below the task list when planningId is set */}
+          {planningId && (() => {
+            const entry = monthlyTasks.find(e => e.id === planningId);
+            if (!entry) return null;
+            const assigned = assignedDaysMap[entry.id] || [];
+            const assignedDayNums = assigned.map(d => parseInt(d.split('-')[2], 10));
+            return (
+              <div className="border rounded-md p-3 bg-card space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-medium">Plan &ldquo;{entry.content}&rdquo; to day:</p>
+                  <button onClick={() => setPlanningId(null)} className="text-xs text-muted-foreground hover:text-foreground">✕</button>
+                </div>
+                <div className="grid grid-cols-7 gap-1">
+                  {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(d => {
+                    const isAssigned = assignedDayNums.includes(d);
+                    return (
+                      <button
+                        key={d}
+                        onClick={() => handlePlanToDay(entry, d)}
+                        className={cn(
+                          'w-7 h-7 text-xs rounded hover:bg-accent transition-colors',
+                          isAssigned && 'bg-primary/20 text-primary font-medium',
+                        )}
+                      >
+                        {d}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       </div>
     </div>

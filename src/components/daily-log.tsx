@@ -13,12 +13,20 @@ import type { Entry, EntryType, EntryStatus } from '@/lib/types';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
   parseEntryPrefix,
   bulletSymbol,
-  nextStatus,
   createEntry,
   updateEntry,
   deleteEntry,
+  completeEntry,
+  cancelEntry,
+  syncStatusToParent,
   fetchEntriesForDate,
   fetchIncompleteFromPast,
   migrateEntry,
@@ -42,6 +50,7 @@ function statusIcon(entry: Entry) {
   if (entry.status === 'done') return '×';
   if (entry.status === 'migrated') return '>';
   if (entry.status === 'scheduled') return '<';
+  if (entry.status === 'cancelled') return '•';
   return bulletSymbol[entry.type];
 }
 
@@ -50,6 +59,7 @@ const statusStyles: Record<EntryStatus, string> = {
   done: 'line-through text-muted-foreground',
   migrated: 'text-muted-foreground italic',
   scheduled: 'text-muted-foreground italic',
+  cancelled: 'line-through text-muted-foreground/60',
 };
 
 interface DailyLogProps {
@@ -73,6 +83,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
   const [monthlyTasks, setMonthlyTasks] = useState<Entry[]>([]);
   const [selectedMonthly, setSelectedMonthly] = useState<Set<string>>(new Set());
   const [pullingMonthly, setPullingMonthly] = useState(false);
+  const [migrateCalendarId, setMigrateCalendarId] = useState<string | null>(null);
 
   const today = new Date().toISOString().split('T')[0];
 
@@ -87,7 +98,6 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
     setLoading(false);
   }, [today]);
 
-  // Reload entries whenever the date changes (including navigating back)
   useEffect(() => {
     loadEntries(date);
   }, [date, loadEntries]);
@@ -140,10 +150,8 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
     if (!input.trim()) return;
     const { type, content } = parseEntryPrefix(input);
     
-    // Find parent based on indent
     let parentId: string | null = null;
     if (indentLevel > 0 && entries.length > 0) {
-      // Find the last entry at a lower indent level
       const rootEntries = entries.filter(e => !e.parent_id);
       if (rootEntries.length > 0) {
         parentId = rootEntries[rootEntries.length - 1].id;
@@ -179,11 +187,26 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
     }
   };
 
-  const handleStatusCycle = async (entry: Entry) => {
-    const newStatus = nextStatus(entry.status);
-    const ok = await updateEntry(entry.id, { status: newStatus });
+  const handleComplete = async (entry: Entry) => {
+    const ok = await completeEntry(entry.id);
     if (ok) {
-      setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: newStatus } : e));
+      // Bidirectional sync: if this daily entry has a parent, update it
+      if (entry.parent_id) {
+        await syncStatusToParent(entry.id, 'done');
+      }
+      setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'done' } : e));
+      toast('Completed');
+    }
+  };
+
+  const handleCancel = async (entry: Entry) => {
+    const ok = await cancelEntry(entry.id);
+    if (ok) {
+      if (entry.parent_id) {
+        await syncStatusToParent(entry.id, 'cancelled');
+      }
+      setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'cancelled' } : e));
+      toast('Cancelled');
     }
   };
 
@@ -212,10 +235,12 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
     setEditingId(null);
   };
 
-  const handleMigrate = async (entry: Entry) => {
-    const result = await migrateEntry(entry.id, today);
+  const handleMigrate = async (entry: Entry, targetDate?: string) => {
+    const target = targetDate || today;
+    const result = await migrateEntry(entry.id, target);
     if (result) {
-      toast('Entry migrated to today');
+      toast(`Migrated to ${target === today ? 'today' : target}`);
+      setMigrateCalendarId(null);
       loadEntries(date);
     }
   };
@@ -237,7 +262,6 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
     return entry.parent_id ? 1 : 0;
   };
 
-  // Organize entries: parents first, then children under them
   const organizedEntries = () => {
     const roots = entries.filter(e => !e.parent_id);
     const result: Entry[] = [];
@@ -246,7 +270,6 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
       const children = entries.filter(e => e.parent_id === root.id);
       result.push(...children);
     }
-    // Add any orphans
     const ids = new Set(result.map(e => e.id));
     for (const e of entries) {
       if (!ids.has(e.id)) result.push(e);
@@ -254,7 +277,6 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
     return result;
   };
 
-  // Touch handling for swipe-to-delete
   const [touchStart, setTouchStart] = useState<{ id: string; x: number } | null>(null);
   const [swipedId, setSwipedId] = useState<string | null>(null);
 
@@ -405,6 +427,8 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
           {organizedEntries().map((entry) => {
             const depth = getDepth(entry);
             const isSwiped = swipedId === entry.id;
+            const isTask = entry.type === 'task';
+            const isActionable = entry.status === 'open';
             return (
               <div
                 key={entry.id}
@@ -423,18 +447,18 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
                 }}
                 onTouchEnd={() => setTouchStart(null)}
               >
-                <button
-                  onClick={() => handleStatusCycle(entry)}
+                <span
                   className={cn(
-                    'mt-0.5 w-5 h-5 flex items-center justify-center text-sm shrink-0 rounded hover:bg-accent transition-colors cursor-pointer',
+                    'mt-0.5 w-5 h-5 flex items-center justify-center text-sm shrink-0',
                     entry.status === 'done' && 'text-muted-foreground',
                     entry.status === 'migrated' && 'text-muted-foreground',
                     entry.status === 'scheduled' && 'text-muted-foreground',
+                    entry.status === 'cancelled' && 'text-muted-foreground/60',
                   )}
                   title={`${entry.type} — ${entry.status}`}
                 >
                   {statusIcon(entry)}
-                </button>
+                </span>
                 
                 {editingId === entry.id ? (
                   <input
@@ -461,23 +485,45 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
                 )}
 
                 {/* Actions */}
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  {entry.status === 'open' && entry.type === 'task' && date !== today && (
+                <div className="flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0">
+                  {isTask && isActionable && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button className="text-xs text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-accent" title="Actions">
+                          ⋯
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-44">
+                        <DropdownMenuItem onClick={() => handleComplete(entry)}>
+                          <span className="mr-2">✓</span> Complete
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleCancel(entry)}>
+                          <span className="mr-2">✕</span> Cancel
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setMigrateCalendarId(entry.id)}>
+                          <span className="mr-2">&gt;</span> Migrate to day
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                  {!isTask && (
                     <button
-                      onClick={() => handleMigrate(entry)}
-                      className="text-xs text-muted-foreground hover:text-foreground px-1"
-                      title="Migrate to today"
+                      onClick={() => handleDelete(entry.id)}
+                      className="text-xs text-muted-foreground hover:text-destructive px-1"
+                      title="Delete"
                     >
-                      →
+                      ✕
                     </button>
                   )}
-                  <button
-                    onClick={() => handleDelete(entry.id)}
-                    className="text-xs text-muted-foreground hover:text-destructive px-1"
-                    title="Delete"
-                  >
-                    ✕
-                  </button>
+                  {isTask && !isActionable && (
+                    <button
+                      onClick={() => handleDelete(entry.id)}
+                      className="text-xs text-muted-foreground hover:text-destructive px-1"
+                      title="Delete"
+                    >
+                      🗑
+                    </button>
+                  )}
                 </div>
 
                 {/* Swipe delete button (mobile) */}
@@ -492,6 +538,27 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Migrate calendar popover */}
+      {migrateCalendarId && (
+        <div className="border rounded-md p-3 bg-card space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-medium">Migrate to which day?</p>
+            <button onClick={() => setMigrateCalendarId(null)} className="text-xs text-muted-foreground hover:text-foreground">✕</button>
+          </div>
+          <Calendar
+            mode="single"
+            onSelect={(d) => {
+              if (d) {
+                const entry = entries.find(e => e.id === migrateCalendarId);
+                if (entry) {
+                  handleMigrate(entry, d.toISOString().split('T')[0]);
+                }
+              }
+            }}
+          />
         </div>
       )}
     </div>

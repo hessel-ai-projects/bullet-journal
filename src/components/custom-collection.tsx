@@ -37,8 +37,10 @@ import {
   deleteEntry,
   parseEntryPrefix,
   bulletSymbol,
-  nextStatus,
+  completeEntry,
+  cancelEntry,
 } from '@/lib/entries';
+import type { EntryStatus } from '@/lib/types';
 
 export function CustomCollection({ collectionId }: { collectionId: string }) {
   const router = useRouter();
@@ -82,7 +84,9 @@ export function CustomCollection({ collectionId }: { collectionId: string }) {
   };
 
   const handleStatusCycle = async (entry: Entry) => {
-    const newStatus = nextStatus(entry.status);
+    const cycle: EntryStatus[] = ['open', 'done'];
+    const idx = cycle.indexOf(entry.status);
+    const newStatus = cycle[(idx + 1) % cycle.length];
     const ok = await updateEntry(entry.id, { status: newStatus });
     if (ok) {
       setEntries((prev) => prev.map((e) => (e.id === entry.id ? { ...e, status: newStatus } : e)));

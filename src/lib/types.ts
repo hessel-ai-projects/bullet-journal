@@ -1,5 +1,5 @@
 export type EntryType = 'task' | 'event' | 'note';
-export type EntryStatus = 'open' | 'done' | 'migrated' | 'scheduled';
+export type EntryStatus = 'open' | 'done' | 'migrated' | 'scheduled' | 'cancelled';
 export type LogType = 'daily' | 'monthly' | 'future' | 'collection';
 export type CollectionType = 'meetings' | 'ideas' | 'custom';
 export type EntrySource = 'user' | 'jarvis' | 'calendar';
