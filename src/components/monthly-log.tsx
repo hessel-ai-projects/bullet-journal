@@ -7,7 +7,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import type { Entry } from '@/lib/types';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Badge } from '@/components/ui/badge';
 import {
   DropdownMenu,
@@ -63,6 +62,7 @@ export function MonthlyLog() {
   const [input, setInput] = useState('');
   const [assignedDaysMap, setAssignedDaysMap] = useState<Record<string, string[]>>({});
   const [planningId, setPlanningId] = useState<string | null>(null);
+  const [movingId, setMovingId] = useState<string | null>(null);
 
   const monthName = new Date(year, month - 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   const daysInMonth = new Date(year, month, 0).getDate();
@@ -314,30 +314,9 @@ export function MonthlyLog() {
                           <DropdownMenuItem onClick={() => setPlanningId(planningId === entry.id ? null : entry.id)}>
                             <span className="mr-2">📅</span> Plan to day
                           </DropdownMenuItem>
-                          <DropdownMenu>
-                            <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
-                              <Popover>
-                                <PopoverTrigger asChild>
-                                  <span className="flex items-center w-full cursor-pointer">
-                                    <span className="mr-2">→</span> Move to month
-                                  </span>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-auto p-2" align="end" side="left">
-                                  <div className="space-y-1">
-                                    {futureMonths.map(m => (
-                                      <button
-                                        key={m.dateStr}
-                                        onClick={() => handleMoveToMonth(entry, m.dateStr)}
-                                        className="block w-full text-left text-sm px-3 py-1.5 rounded hover:bg-accent transition-colors"
-                                      >
-                                        {m.label}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </PopoverContent>
-                              </Popover>
-                            </DropdownMenuItem>
-                          </DropdownMenu>
+                          <DropdownMenuItem onClick={() => setMovingId(movingId === entry.id ? null : entry.id)}>
+                            <span className="mr-2">→</span> Move to month
+                          </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     )}
@@ -355,6 +334,32 @@ export function MonthlyLog() {
               );
             })}
           </div>
+
+          {/* Month picker — shown below task list when movingId is set */}
+          {(() => {
+            if (!movingId) return null;
+            const entry = monthlyTasks.find(e => e.id === movingId);
+            if (!entry) return null;
+            return (
+              <div className="border rounded-md p-3 bg-card space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">Move &ldquo;{entry.content}&rdquo; to:</span>
+                  <button onClick={() => setMovingId(null)} className="text-xs text-muted-foreground hover:text-foreground">✕</button>
+                </div>
+                <div className="grid grid-cols-3 gap-1">
+                  {futureMonths.map(m => (
+                    <button
+                      key={m.dateStr}
+                      onClick={() => { handleMoveToMonth(entry, m.dateStr); setMovingId(null); }}
+                      className="text-xs px-2 py-1.5 rounded hover:bg-accent transition-colors text-center"
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Day picker popover — shown below the task list when planningId is set */}
           {planningId && (() => {
