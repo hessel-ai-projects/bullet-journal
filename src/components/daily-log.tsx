@@ -329,7 +329,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Type and press Enter • prefix: - note, o event"
+            placeholder="Type and press Enter • prefix: - note, * event"
             className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
             autoFocus
           />

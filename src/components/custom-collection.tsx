@@ -200,7 +200,7 @@ export function CustomCollection({ collectionId }: { collectionId: string }) {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
-          placeholder="Type and press Enter • prefix: - note, o event"
+          placeholder="Type and press Enter • prefix: - note, * event"
           className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
         />
       </div>

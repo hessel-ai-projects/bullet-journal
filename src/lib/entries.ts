@@ -6,7 +6,7 @@ const supabase = () => createClient();
 export function parseEntryPrefix(raw: string): { type: EntryType; content: string } {
   const trimmed = raw.trim();
   if (trimmed.startsWith('- ')) return { type: 'note', content: trimmed.slice(2) };
-  if (trimmed.startsWith('o ') || trimmed.startsWith('* ')) return { type: 'event', content: trimmed.slice(2) };
+  if (trimmed.startsWith('* ')) return { type: 'event', content: trimmed.slice(2) };
   return { type: 'task', content: trimmed };
 }
 
