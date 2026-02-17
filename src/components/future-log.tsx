@@ -147,7 +147,7 @@ export function FutureLog() {
               onChange={(e) => setInputs(prev => ({ ...prev, [m.dateStr]: e.target.value }))}
               onKeyDown={(e) => e.key === 'Enter' && addEntry(m.dateStr)}
               placeholder="Add entry..."
-              className="w-full bg-transparent text-xs border-b border-border/50 outline-none py-1 placeholder:text-muted-foreground"
+              className="w-full bg-transparent text-xs text-foreground border-b border-border/50 outline-none py-1 placeholder:text-muted-foreground"
             />
           </div>
         );

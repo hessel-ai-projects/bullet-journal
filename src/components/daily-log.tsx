@@ -79,11 +79,10 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
     setLoading(false);
   }, [today]);
 
+  // Reload entries whenever the date changes (including navigating back)
   useEffect(() => {
-    if (date !== initialDate) {
-      loadEntries(date);
-    }
-  }, [date, initialDate, loadEntries]);
+    loadEntries(date);
+  }, [date, loadEntries]);
 
   // Realtime subscription
   useEffect(() => {
@@ -273,7 +272,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Type and press Enter • prefix: - note, o event"
-          className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
           autoFocus
         />
       </div>
@@ -365,7 +364,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
                       if (e.key === 'Enter') finishEdit();
                       if (e.key === 'Escape') setEditingId(null);
                     }}
-                    className="flex-1 bg-transparent text-sm outline-none border-b border-primary/20"
+                    className="flex-1 bg-transparent text-sm text-foreground outline-none border-b border-primary/20"
                   />
                 ) : (
                   <span
