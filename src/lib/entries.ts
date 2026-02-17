@@ -12,7 +12,7 @@ export function parseEntryPrefix(raw: string): { type: EntryType; content: strin
 
 export const bulletSymbol: Record<EntryType, string> = {
   task: '•',
-  event: '◦',
+  event: '⚬',
   note: '–',
 };
 
