@@ -61,13 +61,23 @@ function SidebarContent({ collections, onNavigate }: { collections: Collection[]
         <Separator className="my-2" />
 
         <div className="py-2">
-          <button
-            onClick={() => setExpandCollections(!expandCollections)}
-            className="flex items-center justify-between w-full px-3 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <span className="font-medium">Collections</span>
-            <span className="text-xs">{expandCollections ? '▼' : '▶'}</span>
-          </button>
+          <div className="flex items-center justify-between px-3 py-2">
+            <button
+              onClick={() => setExpandCollections(!expandCollections)}
+              className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <span className="font-medium">Collections</span>
+              <span className="text-xs">{expandCollections ? '▼' : '▶'}</span>
+            </button>
+            <Link
+              href="/collections/new"
+              onClick={onNavigate}
+              className="text-muted-foreground hover:text-foreground text-sm px-1 transition-colors"
+              title="New collection"
+            >
+              +
+            </Link>
+          </div>
 
           {expandCollections && (
             <div className="space-y-1 ml-2">
@@ -161,6 +171,7 @@ function SidebarContent({ collections, onNavigate }: { collections: Collection[]
 export function Sidebar() {
   const [collections, setCollections] = useState<Collection[]>([]);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const pathname = usePathname();
 
   useEffect(() => {
     const supabase = createClient();
@@ -171,7 +182,7 @@ export function Sidebar() {
       .then(({ data }) => {
         if (data) setCollections(data as Collection[]);
       });
-  }, []);
+  }, [pathname]);
 
   return (
     <>
