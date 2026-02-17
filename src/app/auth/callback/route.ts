@@ -29,6 +29,29 @@ export async function GET(request: Request) {
 
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
+      // Create profile if it doesn't exist yet
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const serviceClient = createServerClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.SUPABASE_SERVICE_ROLE_KEY!,
+          {
+            cookies: {
+              get() { return undefined; },
+              set() {},
+              remove() {},
+            },
+          }
+        );
+        await serviceClient
+          .from('profiles')
+          .upsert({
+            id: user.id,
+            email: user.email!,
+            name: user.user_metadata?.full_name ?? null,
+            avatar_url: user.user_metadata?.avatar_url ?? null,
+          }, { onConflict: 'id' });
+      }
       return NextResponse.redirect(`${origin}${next}`);
     }
   }
