@@ -22,7 +22,7 @@ import {
   fetchEntriesForMonth,
   fetchMonthlyEntries,
   createEntry,
-  deleteEntry,
+  deleteEntryWithSync,
   completeEntry,
   cancelEntry,
   planToDay,
@@ -168,7 +168,7 @@ export function MonthlyLog() {
   };
 
   const handleDelete = async (id: string) => {
-    const ok = await deleteEntry(id);
+    const ok = await deleteEntryWithSync(id);
     if (ok) {
       setMonthlyTasks(prev => prev.filter(e => e.id !== id));
       toast('Deleted');

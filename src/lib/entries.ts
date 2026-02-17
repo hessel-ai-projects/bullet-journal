@@ -154,6 +154,75 @@ export async function deleteEntry(id: string): Promise<boolean> {
   return !error;
 }
 
+/**
+ * Delete an entry and any linked parent/child entries (bidirectional).
+ */
+export async function deleteEntryWithSync(id: string): Promise<boolean> {
+  // Get the entry to check for links
+  const { data: entry } = await supabase()
+    .from('entries')
+    .select('id, parent_id')
+    .eq('id', id)
+    .single();
+
+  if (!entry) return false;
+
+  // If this entry has a parent (daily → monthly link), delete the parent too
+  if (entry.parent_id) {
+    await supabase().from('entries').delete().eq('id', entry.parent_id);
+  }
+
+  // Delete any children (monthly → daily link)
+  await supabase().from('entries').delete().eq('parent_id', id);
+
+  // Delete the entry itself
+  const { error } = await supabase().from('entries').delete().eq('id', id);
+  return !error;
+}
+
+/**
+ * Update an entry's content and sync to any linked parent/child entries.
+ */
+export async function updateEntryWithSync(id: string, updates: Partial<Entry>): Promise<boolean> {
+  const ok = await updateEntry(id, updates);
+  if (!ok) return false;
+
+  // Only sync content/type changes, not status (status has its own sync)
+  const syncFields: Partial<Entry> = {};
+  if (updates.content !== undefined) syncFields.content = updates.content;
+  if (updates.type !== undefined) syncFields.type = updates.type;
+
+  if (Object.keys(syncFields).length === 0) return true;
+
+  // Get the entry to check for links
+  const { data: entry } = await supabase()
+    .from('entries')
+    .select('id, parent_id')
+    .eq('id', id)
+    .single();
+
+  if (!entry) return true;
+
+  // Sync to parent if exists
+  if (entry.parent_id) {
+    await updateEntry(entry.parent_id, syncFields);
+  }
+
+  // Sync to children if any
+  const { data: children } = await supabase()
+    .from('entries')
+    .select('id')
+    .eq('parent_id', id);
+
+  if (children) {
+    for (const child of children) {
+      await updateEntry(child.id, syncFields);
+    }
+  }
+
+  return true;
+}
+
 // ── Explicit action functions ──
 
 export async function completeEntry(id: string): Promise<boolean> {

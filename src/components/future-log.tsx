@@ -18,7 +18,7 @@ import {
   parseEntryPrefix,
   fetchFutureEntries,
   createEntry,
-  deleteEntry,
+  deleteEntryWithSync,
   completeEntry,
   cancelEntry,
   syncStatusToChild,
@@ -103,7 +103,7 @@ export function FutureLog() {
   };
 
   const handleDelete = async (id: string) => {
-    const ok = await deleteEntry(id);
+    const ok = await deleteEntryWithSync(id);
     if (ok) {
       setEntries(prev => prev.filter(e => e.id !== id));
       toast('Deleted');

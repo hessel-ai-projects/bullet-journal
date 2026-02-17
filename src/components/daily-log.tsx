@@ -23,7 +23,8 @@ import {
   bulletSymbol,
   createEntry,
   updateEntry,
-  deleteEntry,
+  updateEntryWithSync,
+  deleteEntryWithSync,
   completeEntry,
   cancelEntry,
   syncStatusToParent,
@@ -211,7 +212,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
   };
 
   const handleDelete = async (id: string) => {
-    const ok = await deleteEntry(id);
+    const ok = await deleteEntryWithSync(id);
     if (ok) {
       setEntries(prev => prev.filter(e => e.id !== id));
       toast('Entry deleted');
@@ -227,7 +228,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
   const finishEdit = async () => {
     if (!editingId) return;
     if (editContent.trim()) {
-      const ok = await updateEntry(editingId, { content: editContent.trim() });
+      const ok = await updateEntryWithSync(editingId, { content: editContent.trim() });
       if (ok) {
         setEntries(prev => prev.map(e => e.id === editingId ? { ...e, content: editContent.trim() } : e));
       }
