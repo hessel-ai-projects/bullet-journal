@@ -17,11 +17,11 @@ import {
   nextStatus,
 } from '@/lib/entries';
 
-function getNext6Months() {
+function getCurrentAnd6Months() {
   const months: { year: number; month: number; label: string; dateStr: string }[] = [];
   const now = new Date();
-  for (let i = 0; i < 6; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() + i + 1, 1);
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
     months.push({
       year: d.getFullYear(),
       month: d.getMonth() + 1,
@@ -44,7 +44,7 @@ export function FutureLog() {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
   const [inputs, setInputs] = useState<Record<string, string>>({});
-  const months = getNext6Months();
+  const months = getCurrentAnd6Months();
 
   const load = useCallback(async () => {
     setLoading(true);

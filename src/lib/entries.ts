@@ -60,7 +60,7 @@ export async function fetchMonthlyEntries(year: number, month: number): Promise<
   const { data } = await supabase()
     .from('entries')
     .select('*')
-    .eq('log_type', 'monthly')
+    .in('log_type', ['monthly', 'future'])
     .eq('date', monthStr)
     .order('position', { ascending: true });
   return (data ?? []) as Entry[];
@@ -70,7 +70,7 @@ export async function fetchFutureEntries(): Promise<Entry[]> {
   const { data } = await supabase()
     .from('entries')
     .select('*')
-    .eq('log_type', 'future')
+    .in('log_type', ['future', 'monthly'])
     .order('date', { ascending: true })
     .order('position', { ascending: true });
   return (data ?? []) as Entry[];
