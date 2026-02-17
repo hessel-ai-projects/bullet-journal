@@ -100,9 +100,9 @@ export function MonthlyLog() {
     }
   };
 
-  const entriesByDay = (day: number) => {
+  const eventsByDay = (day: number) => {
     const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    return dailyEntries.filter(e => e.date === dateStr);
+    return dailyEntries.filter(e => e.date === dateStr && e.type === 'event');
   };
 
   if (loading) {
@@ -135,7 +135,7 @@ export function MonthlyLog() {
               const d = new Date(year, month - 1, day);
               const dayName = DAYS[d.getDay()];
               const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-              const dayEntries = entriesByDay(day);
+              const dayEntries = eventsByDay(day);
               const todayStr = new Date().toISOString().split('T')[0];
               const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
               const isToday = dateStr === todayStr;
