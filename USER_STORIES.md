@@ -68,7 +68,7 @@
 | M5 | User can navigate between months (prev/next arrows) | ✅ | |
 | M6 | Today's date is highlighted in the calendar | ✅ | `bg-accent/30` |
 | M7 | Weekend days are visually muted | ✅ | `text-muted-foreground` |
-| M8 | Right panel "Monthly Tasks" shows ALL tasks for that month | ✅ | Combines: entries with `log_type='monthly'` or `'future'` (date=month-01) + entries with `log_type='daily'` and `type='task'` for dates in that month |
+| M8 | Right panel "Monthly Tasks" shows ALL tasks for that month | ✅ | Combines: entries with `log_type='monthly'` or `'future'` (date=month-01) + entries with `log_type='daily'` and `type='task'` that have NO `parent_id` (orphan daily tasks only — linked daily tasks are represented by their monthly parent to avoid duplicates) |
 | M9 | Daily tasks show a `(Day X)` indicator | ✅ | To distinguish from monthly-level tasks |
 | M10 | User can add a monthly-level task via input | ✅ | Creates entry with `log_type='monthly'`, `date=YYYY-MM-01` |
 | M11 | User can complete a monthly task | ✅ | Via `⋯` dropdown → Complete. Syncs to linked daily entry if planned |

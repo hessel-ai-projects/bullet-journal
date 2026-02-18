@@ -73,7 +73,8 @@ export function MonthlyLog() {
       fetchMonthlyEntries(year, month),
     ]);
     setDailyEntries(daily);
-    const dailyTasks = daily.filter(e => e.type === 'task');
+    // Exclude daily tasks that have a parent_id (they're already represented by their monthly parent)
+    const dailyTasks = daily.filter(e => e.type === 'task' && !e.parent_id);
     const allTasks = [...monthly, ...dailyTasks];
     setMonthlyTasks(allTasks);
     setLoading(false);
