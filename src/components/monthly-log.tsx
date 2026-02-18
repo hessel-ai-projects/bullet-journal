@@ -74,7 +74,10 @@ export function MonthlyLog() {
       fetchMonthlyEntries(year, month),
     ]);
     setDailyEntries(daily);
-    setMonthlyTasks(monthly);
+    // Combine monthly-level tasks with daily tasks for the right panel
+    const dailyTasks = daily.filter(e => e.type === 'task');
+    const allTasks = [...monthly, ...dailyTasks];
+    setMonthlyTasks(allTasks);
     setLoading(false);
   }, [year, month]);
 
@@ -213,6 +216,7 @@ export function MonthlyLog() {
               const dayName = DAYS[d.getDay()];
               const isWeekend = d.getDay() === 0 || d.getDay() === 6;
               const dayEntries = entriesByDay(day);
+              const dayEvents = dayEntries.filter(e => e.type === 'event');
               const dayTaskCount = dayEntries.filter(e => e.type === 'task').length;
               const todayStr = new Date().toISOString().split('T')[0];
               const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -231,10 +235,10 @@ export function MonthlyLog() {
                   <span className="w-6 text-right tabular-nums">{day}</span>
                   <span className="w-8 text-xs text-muted-foreground">{dayName}</span>
                   <span className="flex-1 truncate text-xs text-muted-foreground">
-                    {dayEntries.slice(0, 3).map(e => e.content).join(' · ')}
+                    {dayEvents.slice(0, 3).map(e => e.content).join(' · ')}
                   </span>
                   {dayTaskCount > 0 && (
-                    <span className="text-xs text-muted-foreground/60">{dayTaskCount}</span>
+                    <span className="text-xs text-muted-foreground/60">{dayTaskCount} •</span>
                   )}
                 </div>
               );
@@ -284,6 +288,11 @@ export function MonthlyLog() {
                     )}>
                       {entry.content}
                     </span>
+                    {entry.log_type === 'daily' && (
+                      <span className="text-[10px] text-muted-foreground ml-1">
+                        (Day {parseInt(entry.date.split('-')[2], 10)})
+                      </span>
+                    )}
                     {entry.status === 'migrated' && assignedDayNums.length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-0.5">
                         {assignedDayNums.map(d => (
