@@ -147,14 +147,14 @@ export async function fetchActionItems(meetingNoteId: string, collectionId: stri
     .from('entries')
     .select('*')
     .eq('collection_id', collectionId)
-    .eq('parent_id', meetingNoteId)
+    .contains('tags', [`meeting:${meetingNoteId}`])
     .order('position', { ascending: true });
   return (data ?? []) as Entry[];
 }
 
 export async function createActionItem(params: {
   collection_id: string;
-  parent_id: string;
+  parent_id: string; // meeting_note id (stored in tags, not FK)
   content: string;
   position: number;
 }): Promise<Entry | null> {
@@ -162,22 +162,27 @@ export async function createActionItem(params: {
   if (!user) return null;
 
   const today = new Date().toISOString().split('T')[0];
+  const monthStr = `${today.slice(0, 7)}-01`;
+
+  // Create as a monthly task (so it shows in monthly log)
   const { data, error } = await supabase()
     .from('entries')
     .insert({
       user_id: user.id,
       type: 'task',
       content: params.content,
-      log_type: 'collection',
+      log_type: 'monthly',
       collection_id: params.collection_id,
-      parent_id: params.parent_id,
-      date: today,
+      date: monthStr,
       position: params.position,
-      tags: [],
+      tags: [`meeting:${params.parent_id}`],
     })
     .select()
     .single();
 
-  if (error) return null;
+  if (error) {
+    console.error('Error creating action item:', error);
+    return null;
+  }
   return data as Entry;
 }
