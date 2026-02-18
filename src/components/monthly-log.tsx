@@ -175,9 +175,9 @@ export function MonthlyLog() {
     }
   };
 
-  const eventsByDay = (day: number) => {
+  const entriesByDay = (day: number) => {
     const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    return dailyEntries.filter(e => e.date === dateStr && e.type === 'event');
+    return dailyEntries.filter(e => e.date === dateStr);
   };
 
   const futureMonths = getNext6Months(year, month);
@@ -212,7 +212,9 @@ export function MonthlyLog() {
               const d = new Date(year, month - 1, day);
               const dayName = DAYS[d.getDay()];
               const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-              const dayEntries = eventsByDay(day);
+              const dayEntries = entriesByDay(day);
+              const dayEvents = dayEntries.filter(e => e.type === 'event');
+              const dayTaskCount = dayEntries.filter(e => e.type === 'task').length;
               const todayStr = new Date().toISOString().split('T')[0];
               const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
               const isToday = dateStr === todayStr;
@@ -230,10 +232,13 @@ export function MonthlyLog() {
                   <span className="w-6 text-right tabular-nums">{day}</span>
                   <span className="w-8 text-xs text-muted-foreground">{dayName}</span>
                   <span className="flex-1 truncate text-xs text-muted-foreground">
-                    {dayEntries.slice(0, 3).map(e => e.content).join(' · ')}
+                    {dayEvents.slice(0, 3).map(e => `⚬ ${e.content}`).join(' · ')}
                   </span>
-                  {dayEntries.length > 0 && (
-                    <span className="text-xs text-muted-foreground">{dayEntries.length}</span>
+                  {dayTaskCount > 0 && (
+                    <span className="text-xs text-muted-foreground/60">{dayTaskCount} •</span>
+                  )}
+                  {dayEvents.length > 0 && (
+                    <span className="text-xs text-muted-foreground">{dayEvents.length} ⚬</span>
                   )}
                 </div>
               );
