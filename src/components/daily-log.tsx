@@ -36,6 +36,7 @@ import {
   migrateAllIncomplete,
   fetchUnassignedMonthlyTasks,
   assignMonthlyTaskToDay,
+  fetchParentStatuses,
 } from '@/lib/entries';
 
 function formatDate(dateStr: string) {
@@ -105,6 +106,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
   const [pullingMonthly, setPullingMonthly] = useState(false);
   const [migrateCalendarId, setMigrateCalendarId] = useState<string | null>(null);
   const [migrateMonthId, setMigrateMonthId] = useState<string | null>(null);
+  const [parentStatuses, setParentStatuses] = useState<Record<string, EntryStatus>>({});
 
   const today = new Date().toISOString().split('T')[0];
 
@@ -122,6 +124,17 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
   useEffect(() => {
     loadEntries(date);
   }, [date, loadEntries]);
+
+  // Load parent statuses for migrated entries (to show resolved visual)
+  useEffect(() => {
+    const migratedWithParent = entries.filter(e => e.status === 'migrated' && e.parent_id);
+    const parentIds = Array.from(new Set(migratedWithParent.map(e => e.parent_id!)));
+    if (parentIds.length === 0) {
+      setParentStatuses({});
+      return;
+    }
+    fetchParentStatuses(parentIds).then(setParentStatuses);
+  }, [entries]);
 
   const loadMonthlyTasks = async () => {
     const d = new Date(date + 'T12:00:00');
@@ -318,6 +331,17 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
   const [touchStart, setTouchStart] = useState<{ id: string; x: number } | null>(null);
   const [swipedId, setSwipedId] = useState<string | null>(null);
 
+  /**
+   * For migrated entries, check if the parent task was eventually resolved.
+   * Returns 'done' | 'cancelled' | null (still open/migrated chain).
+   */
+  const getMigratedResolution = (entry: Entry): EntryStatus | null => {
+    if (entry.status !== 'migrated' || !entry.parent_id) return null;
+    const parentStatus = parentStatuses[entry.parent_id];
+    if (parentStatus === 'done' || parentStatus === 'cancelled') return parentStatus;
+    return null;
+  };
+
   const getMigrateCalendarEntry = () => entries.find(e => e.id === migrateCalendarId);
   const getMigrateMonthEntry = () => entries.find(e => e.id === migrateMonthId);
 
@@ -472,6 +496,9 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
             const isActionable = entry.status === 'open';
             const isMigrated = entry.status === 'migrated';
             const isTerminal = entry.status !== 'open';
+            const resolution = getMigratedResolution(entry);
+            // Migrated entries that were eventually resolved get strikethrough
+            const migratedResolved = isMigrated && resolution !== null;
             return (
               <div
                 key={entry.id}
@@ -496,8 +523,9 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
                     entry.status === 'done' && 'text-muted-foreground',
                     entry.status === 'migrated' && 'text-muted-foreground',
                     entry.status === 'cancelled' && 'text-muted-foreground/60',
+                    migratedResolved && 'text-muted-foreground/60',
                   )}
-                  title={`${entry.type} — ${entry.status}`}
+                  title={`${entry.type} — ${entry.status}${resolution ? ` (${resolution})` : ''}`}
                 >
                   {statusIcon(entry)}
                 </span>
@@ -520,7 +548,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
                     className={cn(
                       'flex-1 text-sm transition-colors',
                       isMigrated ? 'cursor-default' : 'cursor-text',
-                      statusStyles[entry.status]
+                      migratedResolved ? 'line-through text-muted-foreground/60' : statusStyles[entry.status],
                     )}
                   >
                     {entry.content}

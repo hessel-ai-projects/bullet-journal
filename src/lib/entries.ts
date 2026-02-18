@@ -126,6 +126,45 @@ export async function fetchUnassignedMonthlyTasks(year: number, month: number): 
   return monthlyTasks.filter(t => !assignedIds.has(t.id)) as Entry[];
 }
 
+/**
+ * Fetch the current status of parent entries for a list of parent IDs.
+ * Used to determine visual treatment of migrated daily entries.
+ */
+export async function fetchParentStatuses(parentIds: string[]): Promise<Record<string, EntryStatus>> {
+  if (parentIds.length === 0) return {};
+  const { data } = await supabase()
+    .from('entries')
+    .select('id, status')
+    .in('id', parentIds);
+  const map: Record<string, EntryStatus> = {};
+  for (const row of (data ?? [])) {
+    map[row.id] = row.status as EntryStatus;
+  }
+  return map;
+}
+
+/**
+ * For migrated monthly entries, check if any of their daily children
+ * have a resolved status (done/cancelled). Returns a map of monthly entry ID → resolved status.
+ */
+export async function fetchChildResolutions(monthlyIds: string[]): Promise<Record<string, EntryStatus>> {
+  if (monthlyIds.length === 0) return {};
+  const { data } = await supabase()
+    .from('entries')
+    .select('parent_id, status')
+    .in('parent_id', monthlyIds)
+    .eq('log_type', 'daily')
+    .in('status', ['done', 'cancelled']);
+  const map: Record<string, EntryStatus> = {};
+  for (const row of (data ?? [])) {
+    // If any child is done/cancelled, that's the resolution
+    if (row.parent_id && !map[row.parent_id]) {
+      map[row.parent_id] = row.status as EntryStatus;
+    }
+  }
+  return map;
+}
+
 export async function fetchIncompleteFromPast(beforeDate: string): Promise<Entry[]> {
   const { data } = await supabase()
     .from('entries')

@@ -28,7 +28,9 @@ import {
   migrateToMonth,
   syncStatusToChild,
   fetchAssignedDays,
+  fetchChildResolutions,
 } from '@/lib/entries';
+import type { EntryStatus } from '@/lib/types';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -61,6 +63,7 @@ export function MonthlyLog() {
   const [assignedDaysMap, setAssignedDaysMap] = useState<Record<string, string[]>>({});
   const [planningId, setPlanningId] = useState<string | null>(null);
   const [movingId, setMovingId] = useState<string | null>(null);
+  const [childResolutions, setChildResolutions] = useState<Record<string, EntryStatus>>({});
 
   const monthName = new Date(year, month - 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   const daysInMonth = new Date(year, month, 0).getDate();
@@ -96,6 +99,16 @@ export function MonthlyLog() {
       setAssignedDaysMap(map);
     };
     loadAssigned();
+  }, [monthlyTasks]);
+
+  // Load child resolutions for migrated monthly entries
+  useEffect(() => {
+    const migratedIds = monthlyTasks.filter(e => e.status === 'migrated').map(e => e.id);
+    if (migratedIds.length === 0) {
+      setChildResolutions({});
+      return;
+    }
+    fetchChildResolutions(migratedIds).then(setChildResolutions);
   }, [monthlyTasks]);
 
   const handleComplete = async (entry: Entry) => {
@@ -274,13 +287,18 @@ export function MonthlyLog() {
               const isOpen = entry.status === 'open';
               const isTerminal = !isOpen;
               const isMigrated = entry.status === 'migrated';
+              const resolution = isMigrated ? (childResolutions[entry.id] ?? null) : null;
+              const migratedResolved = isMigrated && resolution !== null;
               return (
                 <div key={entry.id} className="group flex items-start gap-2 py-1.5 px-2 rounded hover:bg-accent/50 transition-colors">
                   <span className={cn(
                     'w-5 h-5 flex items-center justify-center text-sm shrink-0 mt-0.5',
                     (entry.status === 'done' || entry.status === 'cancelled') && 'text-muted-foreground',
-                    isMigrated && 'text-muted-foreground',
-                  )}>
+                    isMigrated && !migratedResolved && 'text-muted-foreground',
+                    migratedResolved && 'text-muted-foreground/60',
+                  )}
+                    title={resolution ? `migrated (${resolution})` : entry.status}
+                  >
                     {statusIcon(entry)}
                   </span>
                   <div className="flex-1 min-w-0">
@@ -288,7 +306,8 @@ export function MonthlyLog() {
                       'text-sm',
                       entry.status === 'done' && 'line-through text-muted-foreground',
                       entry.status === 'cancelled' && 'line-through text-muted-foreground/60',
-                      isMigrated && 'text-muted-foreground',
+                      isMigrated && !migratedResolved && 'text-muted-foreground',
+                      migratedResolved && 'line-through text-muted-foreground/60',
                     )}>
                       {entry.content}
                     </span>
