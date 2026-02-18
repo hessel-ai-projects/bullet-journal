@@ -35,7 +35,6 @@ const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 function statusIcon(entry: Entry) {
   if (entry.status === 'done') return '×';
   if (entry.status === 'migrated') return '>';
-  if (entry.status === 'cancelled') return '•';
   return bulletSymbol[entry.type];
 }
 
@@ -73,17 +72,19 @@ export function MonthlyLog() {
       fetchMonthlyEntries(year, month),
     ]);
     setDailyEntries(daily);
-    // Exclude daily tasks that have a parent_id (they're already represented by their monthly parent)
-    const dailyTasks = daily.filter(e => e.type === 'task' && !e.parent_id);
-    const allTasks = [...monthly, ...dailyTasks];
-    setMonthlyTasks(allTasks);
+    // Monthly tasks panel: only show log_type='monthly' tasks
+    setMonthlyTasks(monthly.filter(e => e.type === 'task'));
     setLoading(false);
   }, [year, month]);
 
   useEffect(() => { load(); }, [load]);
 
+  // Load assigned days for each monthly task
   useEffect(() => {
-    if (monthlyTasks.length === 0) return;
+    if (monthlyTasks.length === 0) {
+      setAssignedDaysMap({});
+      return;
+    }
     const loadAssigned = async () => {
       const map: Record<string, string[]> = {};
       await Promise.all(
@@ -125,7 +126,8 @@ export function MonthlyLog() {
         ...prev,
         [entry.id]: [dateStr],
       }));
-      setMonthlyTasks(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'migrated' } : e));
+      // No status change — assignment is detected by having children
+      load(); // Reload to get fresh state
     }
   };
 
@@ -155,6 +157,7 @@ export function MonthlyLog() {
   const addMonthlyTask = async () => {
     if (!input.trim()) return;
     const { type, content } = parseEntryPrefix(input);
+    // Monthly tasks created here use YYYY-MM-01 (unassigned)
     const monthStr = `${year}-${String(month).padStart(2, '0')}-01`;
     const entry = await createEntry({
       type,
@@ -238,7 +241,7 @@ export function MonthlyLog() {
                     {dayEvents.slice(0, 3).map(e => e.content).join(' · ')}
                   </span>
                   {dayTaskCount > 0 && (
-                    <span className="text-xs text-muted-foreground/60">{dayTaskCount} •</span>
+                    <span className="text-xs text-muted-foreground/60">{dayTaskCount} ●</span>
                   )}
                 </div>
               );
@@ -267,16 +270,16 @@ export function MonthlyLog() {
             {monthlyTasks.map(entry => {
               const assigned = assignedDaysMap[entry.id] || [];
               const assignedDayNums = assigned.map(d => parseInt(d.split('-')[2], 10));
-              const isTerminal = entry.status === 'done' || entry.status === 'cancelled' || entry.status === 'migrated';
-              // Migrated tasks with children (planned to day) still show actions
               const hasChildren = assigned.length > 0;
-              const showActions = entry.type === 'task' && (!isTerminal || (entry.status === 'migrated' && hasChildren));
+              const isOpen = entry.status === 'open';
+              const isTerminal = !isOpen;
+              const isMigrated = entry.status === 'migrated';
               return (
                 <div key={entry.id} className="group flex items-start gap-2 py-1.5 px-2 rounded hover:bg-accent/50 transition-colors">
                   <span className={cn(
                     'w-5 h-5 flex items-center justify-center text-sm shrink-0 mt-0.5',
                     (entry.status === 'done' || entry.status === 'cancelled') && 'text-muted-foreground',
-                    entry.status === 'migrated' && 'text-blue-500 dark:text-blue-400',
+                    isMigrated && 'text-muted-foreground',
                   )}>
                     {statusIcon(entry)}
                   </span>
@@ -285,16 +288,12 @@ export function MonthlyLog() {
                       'text-sm',
                       entry.status === 'done' && 'line-through text-muted-foreground',
                       entry.status === 'cancelled' && 'line-through text-muted-foreground/60',
-                      entry.status === 'migrated' && 'text-foreground',
+                      isMigrated && 'text-muted-foreground',
                     )}>
                       {entry.content}
                     </span>
-                    {entry.log_type === 'daily' && (
-                      <span className="text-[10px] text-muted-foreground ml-1">
-                        (Day {parseInt(entry.date.split('-')[2], 10)})
-                      </span>
-                    )}
-                    {entry.status === 'migrated' && assignedDayNums.length > 0 && (
+                    {/* Show assigned day badges */}
+                    {hasChildren && (
                       <div className="flex flex-wrap gap-1 mt-0.5">
                         {assignedDayNums.map(d => (
                           <Badge key={d} variant="secondary" className="text-[10px] px-1 py-0 h-4 cursor-pointer" onClick={() => goToDay(d)}>
@@ -306,7 +305,8 @@ export function MonthlyLog() {
                   </div>
 
                   <div className="flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0">
-                    {showActions && (
+                    {/* Open tasks: full actions */}
+                    {isOpen && (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <button className="text-xs text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-accent" title="Actions">
@@ -314,29 +314,28 @@ export function MonthlyLog() {
                           </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-48">
-                          {entry.status === 'open' && (
-                            <>
-                              <DropdownMenuItem onClick={() => handleComplete(entry)}>
-                                <span className="mr-2">✓</span> Complete
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleCancel(entry)}>
-                                <span className="mr-2">✕</span> Cancel
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                            </>
-                          )}
-                          {entry.log_type !== 'daily' && (
-                            <DropdownMenuItem onClick={() => setPlanningId(planningId === entry.id ? null : entry.id)}>
-                              <span className="mr-2">📅</span> Plan to day
-                            </DropdownMenuItem>
-                          )}
+                          <DropdownMenuItem onClick={() => handleComplete(entry)}>
+                            <span className="mr-2">✓</span> Complete
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleCancel(entry)}>
+                            <span className="mr-2">✕</span> Cancel
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onClick={() => setPlanningId(planningId === entry.id ? null : entry.id)}>
+                            <span className="mr-2">📅</span> Plan to day
+                          </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => setMovingId(movingId === entry.id ? null : entry.id)}>
                             <span className="mr-2">→</span> Migrate to month
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onClick={() => handleDelete(entry.id)} className="text-destructive">
+                            <span className="mr-2">🗑</span> Delete
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     )}
-                    {isTerminal && !(entry.status === 'migrated' && hasChildren) && (
+                    {/* Terminal: just delete */}
+                    {isTerminal && (
                       <button
                         onClick={() => handleDelete(entry.id)}
                         className="text-xs text-muted-foreground hover:text-destructive px-1"

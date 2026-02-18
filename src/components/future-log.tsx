@@ -15,13 +15,11 @@ import {
 } from '@/components/ui/dropdown-menu';
 import {
   bulletSymbol,
-  parseEntryPrefix,
   fetchFutureEntries,
   createEntry,
   deleteEntryWithSync,
   completeEntry,
   cancelEntry,
-  syncStatusToChild,
 } from '@/lib/entries';
 
 function getCurrentAnd6Months() {
@@ -42,7 +40,6 @@ function getCurrentAnd6Months() {
 function statusIcon(entry: Entry) {
   if (entry.status === 'done') return '×';
   if (entry.status === 'migrated') return '>';
-  if (entry.status === 'cancelled') return '•';
   return bulletSymbol[entry.type];
 }
 
@@ -56,7 +53,8 @@ export function FutureLog() {
   const load = useCallback(async () => {
     setLoading(true);
     const data = await fetchFutureEntries();
-    setEntries(data);
+    // Future log: tasks only
+    setEntries(data.filter(e => e.type === 'task'));
     setLoading(false);
   }, []);
 
@@ -67,11 +65,11 @@ export function FutureLog() {
   const addEntry = async (dateStr: string) => {
     const raw = inputs[dateStr]?.trim();
     if (!raw) return;
-    const { type, content } = parseEntryPrefix(raw);
+    // Future log only creates tasks (ignore prefix parsing for type)
     const monthEntries = entriesFor(dateStr);
     const entry = await createEntry({
-      type,
-      content,
+      type: 'task',
+      content: raw,
       log_type: 'future',
       date: dateStr,
       position: monthEntries.length,
@@ -79,14 +77,13 @@ export function FutureLog() {
     if (entry) {
       setEntries(prev => [...prev, entry]);
       setInputs(prev => ({ ...prev, [dateStr]: '' }));
-      toast('Entry added');
+      toast('Task added');
     }
   };
 
   const handleComplete = async (entry: Entry) => {
     const ok = await completeEntry(entry.id);
     if (ok) {
-      await syncStatusToChild(entry.id, 'done');
       setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'done' } : e));
       toast('Completed');
     }
@@ -95,7 +92,6 @@ export function FutureLog() {
   const handleCancel = async (entry: Entry) => {
     const ok = await cancelEntry(entry.id);
     if (ok) {
-      await syncStatusToChild(entry.id, 'cancelled');
       setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'cancelled' } : e));
       toast('Cancelled');
     }
@@ -136,16 +132,15 @@ export function FutureLog() {
 
             <div className="space-y-0.5 min-h-[40px]">
               {monthEntries.length === 0 && (
-                <p className="text-muted-foreground text-xs py-2 text-center">No entries</p>
+                <p className="text-muted-foreground text-xs py-2 text-center">No tasks</p>
               )}
               {monthEntries.map(entry => {
                 const isActionable = entry.status === 'open';
-                const isTask = entry.type === 'task';
                 return (
                   <div key={entry.id} className="group flex items-center gap-2 py-1 text-sm">
                     <span className={cn(
                       'shrink-0 w-4 text-center',
-                      (entry.status === 'done' || entry.status === 'cancelled') && 'text-muted-foreground',
+                      entry.status !== 'open' && 'text-muted-foreground',
                     )}>
                       {statusIcon(entry)}
                     </span>
@@ -153,11 +148,12 @@ export function FutureLog() {
                       'flex-1 truncate text-xs',
                       entry.status === 'done' && 'line-through text-muted-foreground',
                       entry.status === 'cancelled' && 'line-through text-muted-foreground/60',
+                      entry.status === 'migrated' && 'text-muted-foreground',
                     )}>
                       {entry.content}
                     </span>
                     <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                      {isTask && isActionable ? (
+                      {isActionable ? (
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <button className="text-xs text-muted-foreground hover:text-foreground px-1" title="Actions">
@@ -171,6 +167,9 @@ export function FutureLog() {
                             <DropdownMenuItem onClick={() => handleCancel(entry)}>
                               <span className="mr-2">✕</span> Cancel
                             </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleDelete(entry.id)} className="text-destructive">
+                              <span className="mr-2">🗑</span> Delete
+                            </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
                       ) : (
@@ -178,7 +177,7 @@ export function FutureLog() {
                           onClick={() => handleDelete(entry.id)}
                           className="text-xs text-muted-foreground hover:text-destructive"
                         >
-                          ✕
+                          🗑
                         </button>
                       )}
                     </div>
@@ -191,7 +190,7 @@ export function FutureLog() {
               value={inputs[m.dateStr] || ''}
               onChange={(e) => setInputs(prev => ({ ...prev, [m.dateStr]: e.target.value }))}
               onKeyDown={(e) => e.key === 'Enter' && addEntry(m.dateStr)}
-              placeholder="Add entry..."
+              placeholder="Add task..."
               className="w-full bg-transparent text-xs text-foreground border-b border-border/50 outline-none py-1 placeholder:text-muted-foreground"
             />
           </div>

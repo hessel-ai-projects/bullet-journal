@@ -49,10 +49,16 @@ function addDays(dateStr: string, n: number) {
   return d.toISOString().split('T')[0];
 }
 
+/**
+ * Display icon for an entry based on type and status.
+ * - open: type symbol (● ○ –)
+ * - done: × 
+ * - migrated: >
+ * - cancelled: type symbol (with strikethrough applied via CSS)
+ */
 function statusIcon(entry: Entry) {
   if (entry.status === 'done') return '×';
   if (entry.status === 'migrated') return '>';
-  if (entry.status === 'cancelled') return '•';
   return bulletSymbol[entry.type];
 }
 
@@ -233,6 +239,8 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
   };
 
   const startEdit = (entry: Entry) => {
+    // Migrated entries are read-only
+    if (entry.status === 'migrated') return;
     setEditingId(entry.id);
     setEditContent(entry.content);
     setTimeout(() => editRef.current?.focus(), 50);
@@ -310,7 +318,6 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
   const [touchStart, setTouchStart] = useState<{ id: string; x: number } | null>(null);
   const [swipedId, setSwipedId] = useState<string | null>(null);
 
-  // Get the month of the entry for the calendar picker constraint
   const getMigrateCalendarEntry = () => entries.find(e => e.id === migrateCalendarId);
   const getMigrateMonthEntry = () => entries.find(e => e.id === migrateMonthId);
 
@@ -362,7 +369,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Type and press Enter • prefix: - note, * event"
+            placeholder="Type and press Enter ● prefix: - note, * event"
             className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
             autoFocus
           />
@@ -461,8 +468,10 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
           {organizedEntries().map((entry) => {
             const depth = getDepth(entry);
             const isSwiped = swipedId === entry.id;
-            const isTask = entry.type === 'task';
+            const isNote = entry.type === 'note';
             const isActionable = entry.status === 'open';
+            const isMigrated = entry.status === 'migrated';
+            const isTerminal = entry.status !== 'open';
             return (
               <div
                 key={entry.id}
@@ -509,7 +518,8 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
                   <span
                     onClick={() => startEdit(entry)}
                     className={cn(
-                      'flex-1 text-sm cursor-text transition-colors',
+                      'flex-1 text-sm transition-colors',
+                      isMigrated ? 'cursor-default' : 'cursor-text',
                       statusStyles[entry.status]
                     )}
                   >
@@ -519,7 +529,18 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
 
                 {/* Actions */}
                 <div className="flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0">
-                  {isTask && isActionable && (
+                  {/* Notes: only delete, no status actions */}
+                  {isNote && (
+                    <button
+                      onClick={() => handleDelete(entry.id)}
+                      className="text-xs text-muted-foreground hover:text-destructive px-1"
+                      title="Delete"
+                    >
+                      ✕
+                    </button>
+                  )}
+                  {/* Tasks and Events: full actions when open */}
+                  {!isNote && isActionable && (
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <button className="text-xs text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-accent" title="Actions">
@@ -540,19 +561,15 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
                         <DropdownMenuItem onClick={() => setMigrateMonthId(entry.id)}>
                           <span className="mr-2">→</span> Migrate to month
                         </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onClick={() => handleDelete(entry.id)} className="text-destructive">
+                          <span className="mr-2">🗑</span> Delete
+                        </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
                   )}
-                  {!isTask && (
-                    <button
-                      onClick={() => handleDelete(entry.id)}
-                      className="text-xs text-muted-foreground hover:text-destructive px-1"
-                      title="Delete"
-                    >
-                      ✕
-                    </button>
-                  )}
-                  {isTask && !isActionable && (
+                  {/* Terminal tasks/events: just delete */}
+                  {!isNote && isTerminal && (
                     <button
                       onClick={() => handleDelete(entry.id)}
                       className="text-xs text-muted-foreground hover:text-destructive px-1"
@@ -582,7 +599,6 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
       {migrateCalendarId && (() => {
         const entry = getMigrateCalendarEntry();
         if (!entry) return null;
-        // Restrict to same month
         const entryDate = new Date(entry.date + 'T12:00:00');
         const monthStart = new Date(entryDate.getFullYear(), entryDate.getMonth(), 1);
         const monthEnd = new Date(entryDate.getFullYear(), entryDate.getMonth() + 1, 0);
