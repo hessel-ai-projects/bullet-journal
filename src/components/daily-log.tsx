@@ -16,6 +16,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
@@ -31,6 +32,7 @@ import {
   fetchEntriesForDate,
   fetchIncompleteFromPast,
   migrateEntry,
+  migrateToMonth,
   migrateAllIncomplete,
   fetchUnassignedMonthlyTasks,
   assignMonthlyTaskToDay,
@@ -50,7 +52,6 @@ function addDays(dateStr: string, n: number) {
 function statusIcon(entry: Entry) {
   if (entry.status === 'done') return '×';
   if (entry.status === 'migrated') return '>';
-  if (entry.status === 'scheduled') return '<';
   if (entry.status === 'cancelled') return '•';
   return bulletSymbol[entry.type];
 }
@@ -58,10 +59,22 @@ function statusIcon(entry: Entry) {
 const statusStyles: Record<EntryStatus, string> = {
   open: '',
   done: 'line-through text-muted-foreground',
-  migrated: 'text-muted-foreground italic',
-  scheduled: 'text-muted-foreground italic',
+  migrated: 'text-muted-foreground',
   cancelled: 'line-through text-muted-foreground/60',
 };
+
+function getNext6Months(currentDate: string) {
+  const d = new Date(currentDate + 'T12:00:00');
+  const months: { label: string; dateStr: string }[] = [];
+  for (let i = 1; i <= 6; i++) {
+    const m = new Date(d.getFullYear(), d.getMonth() + i, 1);
+    months.push({
+      label: m.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+      dateStr: `${m.getFullYear()}-${String(m.getMonth() + 1).padStart(2, '0')}-01`,
+    });
+  }
+  return months;
+}
 
 interface DailyLogProps {
   initialEntries: Entry[];
@@ -85,6 +98,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
   const [selectedMonthly, setSelectedMonthly] = useState<Set<string>>(new Set());
   const [pullingMonthly, setPullingMonthly] = useState(false);
   const [migrateCalendarId, setMigrateCalendarId] = useState<string | null>(null);
+  const [migrateMonthId, setMigrateMonthId] = useState<string | null>(null);
 
   const today = new Date().toISOString().split('T')[0];
 
@@ -191,7 +205,6 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
   const handleComplete = async (entry: Entry) => {
     const ok = await completeEntry(entry.id);
     if (ok) {
-      // Bidirectional sync: if this daily entry has a parent, update it
       if (entry.parent_id) {
         await syncStatusToParent(entry.id, 'done');
       }
@@ -236,12 +249,28 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
     setEditingId(null);
   };
 
-  const handleMigrate = async (entry: Entry, targetDate?: string) => {
-    const target = targetDate || today;
-    const result = await migrateEntry(entry.id, target);
+  const handleMigrateToDay = async (entry: Entry, targetDate: string) => {
+    const result = await migrateEntry(entry.id, targetDate);
     if (result) {
-      toast(`Migrated to ${target === today ? 'today' : target}`);
+      toast(`Migrated to ${targetDate}`);
       setMigrateCalendarId(null);
+      loadEntries(date);
+    }
+  };
+
+  const handleMigrateToMonth = async (entry: Entry, targetMonthDate: string) => {
+    const result = await migrateToMonth(entry.id, targetMonthDate);
+    if (result) {
+      toast('Migrated to ' + new Date(targetMonthDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', year: 'numeric' }));
+      setMigrateMonthId(null);
+      loadEntries(date);
+    }
+  };
+
+  const handleMigratePastEntry = async (entry: Entry) => {
+    const result = await migrateEntry(entry.id, today);
+    if (result) {
+      toast('Migrated to today');
       loadEntries(date);
     }
   };
@@ -280,6 +309,10 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
 
   const [touchStart, setTouchStart] = useState<{ id: string; x: number } | null>(null);
   const [swipedId, setSwipedId] = useState<string | null>(null);
+
+  // Get the month of the entry for the calendar picker constraint
+  const getMigrateCalendarEntry = () => entries.find(e => e.id === migrateCalendarId);
+  const getMigrateMonthEntry = () => entries.find(e => e.id === migrateMonthId);
 
   return (
     <div className="space-y-4">
@@ -398,7 +431,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
               <span className="text-xs opacity-50">{entry.date}</span>
               <span>{bulletSymbol[entry.type]}</span>
               <span className="flex-1 truncate">{entry.content}</span>
-              <Button variant="ghost" size="sm" className="text-xs h-6 px-2" onClick={() => handleMigrate(entry)}>
+              <Button variant="ghost" size="sm" className="text-xs h-6 px-2" onClick={() => handleMigratePastEntry(entry)}>
                 Migrate
               </Button>
             </div>
@@ -453,7 +486,6 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
                     'mt-0.5 w-5 h-5 flex items-center justify-center text-sm shrink-0',
                     entry.status === 'done' && 'text-muted-foreground',
                     entry.status === 'migrated' && 'text-muted-foreground',
-                    entry.status === 'scheduled' && 'text-muted-foreground',
                     entry.status === 'cancelled' && 'text-muted-foreground/60',
                   )}
                   title={`${entry.type} — ${entry.status}`}
@@ -494,15 +526,19 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
                           ⋯
                         </button>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-44">
+                      <DropdownMenuContent align="end" className="w-48">
                         <DropdownMenuItem onClick={() => handleComplete(entry)}>
                           <span className="mr-2">✓</span> Complete
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => handleCancel(entry)}>
                           <span className="mr-2">✕</span> Cancel
                         </DropdownMenuItem>
+                        <DropdownMenuSeparator />
                         <DropdownMenuItem onClick={() => setMigrateCalendarId(entry.id)}>
-                          <span className="mr-2">&gt;</span> Migrate to day
+                          <span className="mr-2">📅</span> Migrate to day
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setMigrateMonthId(entry.id)}>
+                          <span className="mr-2">→</span> Migrate to month
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
@@ -542,26 +578,60 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
         </div>
       )}
 
-      {/* Migrate calendar popover */}
-      {migrateCalendarId && (
-        <div className="border rounded-md p-3 bg-card space-y-2">
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-medium">Migrate to which day?</p>
-            <button onClick={() => setMigrateCalendarId(null)} className="text-xs text-muted-foreground hover:text-foreground">✕</button>
-          </div>
-          <Calendar
-            mode="single"
-            onSelect={(d) => {
-              if (d) {
-                const entry = entries.find(e => e.id === migrateCalendarId);
-                if (entry) {
-                  handleMigrate(entry, d.toISOString().split('T')[0]);
+      {/* Migrate to day calendar picker */}
+      {migrateCalendarId && (() => {
+        const entry = getMigrateCalendarEntry();
+        if (!entry) return null;
+        // Restrict to same month
+        const entryDate = new Date(entry.date + 'T12:00:00');
+        const monthStart = new Date(entryDate.getFullYear(), entryDate.getMonth(), 1);
+        const monthEnd = new Date(entryDate.getFullYear(), entryDate.getMonth() + 1, 0);
+        return (
+          <div className="border rounded-md p-3 bg-card space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-medium">Migrate to which day?</p>
+              <button onClick={() => setMigrateCalendarId(null)} className="text-xs text-muted-foreground hover:text-foreground">✕</button>
+            </div>
+            <Calendar
+              mode="single"
+              defaultMonth={monthStart}
+              fromDate={monthStart}
+              toDate={monthEnd}
+              onSelect={(d) => {
+                if (d) {
+                  handleMigrateToDay(entry, d.toISOString().split('T')[0]);
                 }
-              }
-            }}
-          />
-        </div>
-      )}
+              }}
+            />
+          </div>
+        );
+      })()}
+
+      {/* Migrate to month picker */}
+      {migrateMonthId && (() => {
+        const entry = getMigrateMonthEntry();
+        if (!entry) return null;
+        const futureMonths = getNext6Months(entry.date);
+        return (
+          <div className="border rounded-md p-3 bg-card space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">Migrate &ldquo;{entry.content}&rdquo; to:</span>
+              <button onClick={() => setMigrateMonthId(null)} className="text-xs text-muted-foreground hover:text-foreground">✕</button>
+            </div>
+            <div className="grid grid-cols-3 gap-1">
+              {futureMonths.map(m => (
+                <button
+                  key={m.dateStr}
+                  onClick={() => handleMigrateToMonth(entry, m.dateStr)}
+                  className="text-xs px-2 py-1.5 rounded hover:bg-accent transition-colors text-center"
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

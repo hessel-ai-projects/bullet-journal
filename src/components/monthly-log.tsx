@@ -25,7 +25,7 @@ import {
   completeEntry,
   cancelEntry,
   planToDay,
-  moveToMonth,
+  migrateToMonth,
   syncStatusToChild,
   fetchAssignedDays,
 } from '@/lib/entries';
@@ -35,7 +35,6 @@ const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 function statusIcon(entry: Entry) {
   if (entry.status === 'done') return '×';
   if (entry.status === 'migrated') return '>';
-  if (entry.status === 'scheduled') return '<';
   if (entry.status === 'cancelled') return '•';
   return bulletSymbol[entry.type];
 }
@@ -74,7 +73,6 @@ export function MonthlyLog() {
       fetchMonthlyEntries(year, month),
     ]);
     setDailyEntries(daily);
-    // Combine monthly-level tasks with daily tasks for the right panel
     const dailyTasks = daily.filter(e => e.type === 'task');
     const allTasks = [...monthly, ...dailyTasks];
     setMonthlyTasks(allTasks);
@@ -130,11 +128,12 @@ export function MonthlyLog() {
     }
   };
 
-  const handleMoveToMonth = async (entry: Entry, targetDateStr: string) => {
-    const result = await moveToMonth(entry.id, targetDateStr);
+  const handleMigrateToMonth = async (entry: Entry, targetDateStr: string) => {
+    const result = await migrateToMonth(entry.id, targetDateStr);
     if (result) {
-      setMonthlyTasks(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'scheduled' } : e));
-      toast('Moved to ' + new Date(targetDateStr + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', year: 'numeric' }));
+      setMonthlyTasks(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'migrated' } : e));
+      toast('Migrated to ' + new Date(targetDateStr + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', year: 'numeric' }));
+      setMovingId(null);
     }
   };
 
@@ -267,14 +266,16 @@ export function MonthlyLog() {
             {monthlyTasks.map(entry => {
               const assigned = assignedDaysMap[entry.id] || [];
               const assignedDayNums = assigned.map(d => parseInt(d.split('-')[2], 10));
-              const isTerminal = entry.status === 'done' || entry.status === 'cancelled' || entry.status === 'scheduled';
+              const isTerminal = entry.status === 'done' || entry.status === 'cancelled' || entry.status === 'migrated';
+              // Migrated tasks with children (planned to day) still show actions
+              const hasChildren = assigned.length > 0;
+              const showActions = entry.type === 'task' && (!isTerminal || (entry.status === 'migrated' && hasChildren));
               return (
                 <div key={entry.id} className="group flex items-start gap-2 py-1.5 px-2 rounded hover:bg-accent/50 transition-colors">
                   <span className={cn(
                     'w-5 h-5 flex items-center justify-center text-sm shrink-0 mt-0.5',
                     (entry.status === 'done' || entry.status === 'cancelled') && 'text-muted-foreground',
                     entry.status === 'migrated' && 'text-blue-500 dark:text-blue-400',
-                    entry.status === 'scheduled' && 'text-muted-foreground',
                   )}>
                     {statusIcon(entry)}
                   </span>
@@ -283,7 +284,6 @@ export function MonthlyLog() {
                       'text-sm',
                       entry.status === 'done' && 'line-through text-muted-foreground',
                       entry.status === 'cancelled' && 'line-through text-muted-foreground/60',
-                      entry.status === 'scheduled' && 'text-muted-foreground italic',
                       entry.status === 'migrated' && 'text-foreground',
                     )}>
                       {entry.content}
@@ -304,9 +304,8 @@ export function MonthlyLog() {
                     )}
                   </div>
 
-                  {/* Action buttons — visible on hover (desktop) or always (mobile via group-hover + touch) */}
                   <div className="flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0">
-                    {entry.type === 'task' && !isTerminal && (
+                    {showActions && (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <button className="text-xs text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-accent" title="Actions">
@@ -314,23 +313,29 @@ export function MonthlyLog() {
                           </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-48">
-                          <DropdownMenuItem onClick={() => handleComplete(entry)}>
-                            <span className="mr-2">✓</span> Complete
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleCancel(entry)}>
-                            <span className="mr-2">✕</span> Cancel
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem onClick={() => setPlanningId(planningId === entry.id ? null : entry.id)}>
-                            <span className="mr-2">📅</span> Plan to day
-                          </DropdownMenuItem>
+                          {entry.status === 'open' && (
+                            <>
+                              <DropdownMenuItem onClick={() => handleComplete(entry)}>
+                                <span className="mr-2">✓</span> Complete
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleCancel(entry)}>
+                                <span className="mr-2">✕</span> Cancel
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                            </>
+                          )}
+                          {entry.log_type !== 'daily' && (
+                            <DropdownMenuItem onClick={() => setPlanningId(planningId === entry.id ? null : entry.id)}>
+                              <span className="mr-2">📅</span> Plan to day
+                            </DropdownMenuItem>
+                          )}
                           <DropdownMenuItem onClick={() => setMovingId(movingId === entry.id ? null : entry.id)}>
-                            <span className="mr-2">→</span> Move to month
+                            <span className="mr-2">→</span> Migrate to month
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     )}
-                    {(entry.status === 'done' || entry.status === 'cancelled' || entry.status === 'scheduled') && (
+                    {isTerminal && !(entry.status === 'migrated' && hasChildren) && (
                       <button
                         onClick={() => handleDelete(entry.id)}
                         className="text-xs text-muted-foreground hover:text-destructive px-1"
@@ -345,7 +350,7 @@ export function MonthlyLog() {
             })}
           </div>
 
-          {/* Month picker — shown below task list when movingId is set */}
+          {/* Month picker */}
           {(() => {
             if (!movingId) return null;
             const entry = monthlyTasks.find(e => e.id === movingId);
@@ -353,14 +358,14 @@ export function MonthlyLog() {
             return (
               <div className="border rounded-md p-3 bg-card space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">Move &ldquo;{entry.content}&rdquo; to:</span>
+                  <span className="text-xs text-muted-foreground">Migrate &ldquo;{entry.content}&rdquo; to:</span>
                   <button onClick={() => setMovingId(null)} className="text-xs text-muted-foreground hover:text-foreground">✕</button>
                 </div>
                 <div className="grid grid-cols-3 gap-1">
                   {futureMonths.map(m => (
                     <button
                       key={m.dateStr}
-                      onClick={() => { handleMoveToMonth(entry, m.dateStr); setMovingId(null); }}
+                      onClick={() => handleMigrateToMonth(entry, m.dateStr)}
                       className="text-xs px-2 py-1.5 rounded hover:bg-accent transition-colors text-center"
                     >
                       {m.label}
@@ -371,7 +376,7 @@ export function MonthlyLog() {
             );
           })()}
 
-          {/* Day picker popover — shown below the task list when planningId is set */}
+          {/* Day picker */}
           {planningId && (() => {
             const entry = monthlyTasks.find(e => e.id === planningId);
             if (!entry) return null;

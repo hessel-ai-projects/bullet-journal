@@ -20,7 +20,6 @@ export const statusSymbol: Record<EntryStatus, string> = {
   open: '',
   done: '×',
   migrated: '>',
-  scheduled: '<',
   cancelled: '',
 };
 
@@ -109,6 +108,10 @@ export async function fetchIncompleteFromPast(beforeDate: string): Promise<Entry
 
 // ── CRUD helpers ──
 
+/**
+ * Create an entry. When type='task' AND log_type='daily', auto-creates a monthly
+ * parent entry (D23) and links via parent_id.
+ */
 export async function createEntry(params: {
   type: EntryType;
   content: string;
@@ -119,7 +122,35 @@ export async function createEntry(params: {
 }): Promise<Entry | null> {
   const { data: { user } } = await supabase().auth.getUser();
   if (!user) return null;
-  
+
+  // D23: Auto-create monthly parent for daily tasks (unless already has a parent_id, e.g. from planToDay)
+  let parentId = params.parent_id ?? null;
+  if (params.type === 'task' && params.log_type === 'daily' && !parentId) {
+    const monthStr = params.date.slice(0, 7) + '-01';
+    // Get position in monthly
+    const year = parseInt(params.date.slice(0, 4));
+    const month = parseInt(params.date.slice(5, 7));
+    const existingMonthly = await fetchMonthlyEntries(year, month);
+
+    const { data: monthlyEntry, error: monthlyError } = await supabase()
+      .from('entries')
+      .insert({
+        user_id: user.id,
+        type: 'task',
+        content: params.content,
+        log_type: 'monthly',
+        date: monthStr,
+        position: existingMonthly.length,
+        status: 'migrated',
+      })
+      .select()
+      .single();
+
+    if (!monthlyError && monthlyEntry) {
+      parentId = monthlyEntry.id;
+    }
+  }
+
   const { data, error } = await supabase()
     .from('entries')
     .insert({
@@ -129,7 +160,7 @@ export async function createEntry(params: {
       log_type: params.log_type,
       date: params.date,
       position: params.position,
-      parent_id: params.parent_id ?? null,
+      parent_id: parentId,
     })
     .select()
     .single();
@@ -158,7 +189,6 @@ export async function deleteEntry(id: string): Promise<boolean> {
  * Delete an entry and any linked parent/child entries (bidirectional).
  */
 export async function deleteEntryWithSync(id: string): Promise<boolean> {
-  // Get the entry to check for links
   const { data: entry } = await supabase()
     .from('entries')
     .select('id, parent_id')
@@ -187,14 +217,12 @@ export async function updateEntryWithSync(id: string, updates: Partial<Entry>): 
   const ok = await updateEntry(id, updates);
   if (!ok) return false;
 
-  // Only sync content/type changes, not status (status has its own sync)
   const syncFields: Partial<Entry> = {};
   if (updates.content !== undefined) syncFields.content = updates.content;
   if (updates.type !== undefined) syncFields.type = updates.type;
 
   if (Object.keys(syncFields).length === 0) return true;
 
-  // Get the entry to check for links
   const { data: entry } = await supabase()
     .from('entries')
     .select('id, parent_id')
@@ -203,12 +231,10 @@ export async function updateEntryWithSync(id: string, updates: Partial<Entry>): 
 
   if (!entry) return true;
 
-  // Sync to parent if exists
   if (entry.parent_id) {
     await updateEntry(entry.parent_id, syncFields);
   }
 
-  // Sync to children if any
   const { data: children } = await supabase()
     .from('entries')
     .select('id')
@@ -238,7 +264,6 @@ export async function cancelEntry(id: string): Promise<boolean> {
  * MAX ONE day per monthly task — if already planned, update the existing daily entry's date.
  */
 export async function planToDay(monthlyEntryId: string, date: string): Promise<Entry | null> {
-  // Check if a daily child already exists
   const { data: existingChildren } = await supabase()
     .from('entries')
     .select('*')
@@ -246,7 +271,6 @@ export async function planToDay(monthlyEntryId: string, date: string): Promise<E
     .eq('log_type', 'daily');
 
   if (existingChildren && existingChildren.length > 0) {
-    // Update existing daily entry's date instead of creating new
     const child = existingChildren[0];
     const ok = await updateEntry(child.id, { date });
     if (ok) {
@@ -256,7 +280,6 @@ export async function planToDay(monthlyEntryId: string, date: string): Promise<E
     return null;
   }
 
-  // Get the monthly entry
   const { data: monthly } = await supabase()
     .from('entries')
     .select('*')
@@ -265,7 +288,6 @@ export async function planToDay(monthlyEntryId: string, date: string): Promise<E
 
   if (!monthly) return null;
 
-  // Get position for the target date
   const existing = await fetchEntriesForDate(date);
 
   const dailyEntry = await createEntry({
@@ -284,10 +306,57 @@ export async function planToDay(monthlyEntryId: string, date: string): Promise<E
   return dailyEntry;
 }
 
+// ── Migration helpers ──
+
 /**
- * Move an entry to another month. Sets status to 'scheduled', creates a copy in the target month.
+ * Migrate a daily entry to a different day in the same month.
+ * Reuses existing monthly parent. If no monthly parent, creates one (defensive).
  */
-export async function moveToMonth(entryId: string, targetMonthDate: string): Promise<Entry | null> {
+export async function migrateEntry(id: string, newDate: string): Promise<Entry | null> {
+  const { data: original } = await supabase()
+    .from('entries')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (!original) return null;
+
+  const origMonth = original.date.slice(0, 7);
+  const newMonth = newDate.slice(0, 7);
+
+  if (origMonth === newMonth && original.parent_id) {
+    // Same month with existing monthly parent: just update the daily entry's date
+    await updateEntry(id, { date: newDate });
+    // Return updated entry
+    return { ...original, date: newDate } as Entry;
+  }
+
+  // Different month or no parent — mark old as migrated and create new
+  await updateEntry(id, { status: 'migrated' });
+
+  // If old entry had a monthly parent and we're moving to different month,
+  // mark old monthly parent as migrated too
+  if (original.parent_id && origMonth !== newMonth) {
+    await updateEntry(original.parent_id, { status: 'migrated' });
+  }
+
+  const existing = await fetchEntriesForDate(newDate);
+  // createEntry will auto-create monthly parent for the new month (D23)
+  return createEntry({
+    type: original.type,
+    content: original.content,
+    log_type: 'daily',
+    date: newDate,
+    position: existing.length,
+  });
+}
+
+/**
+ * Migrate an entry to a different month.
+ * Marks current daily + monthly parent as migrated.
+ * Creates new monthly entry in target month (no daily entry — user plans to day later).
+ */
+export async function migrateToMonth(entryId: string, targetMonthDate: string): Promise<Entry | null> {
   const { data: original } = await supabase()
     .from('entries')
     .select('*')
@@ -296,88 +365,43 @@ export async function moveToMonth(entryId: string, targetMonthDate: string): Pro
 
   if (!original) return null;
 
-  // Determine log_type based on how far the target is
-  const logType = original.log_type === 'future' ? 'future' : 'monthly';
+  // Mark daily entry as migrated
+  await updateEntry(entryId, { status: 'migrated' });
+
+  // Mark monthly parent as migrated if exists
+  if (original.parent_id) {
+    await updateEntry(original.parent_id, { status: 'migrated' });
+  }
+
+  const { data: { user } } = await supabase().auth.getUser();
+  if (!user) return null;
 
   // Get position in target month
   const targetYear = parseInt(targetMonthDate.slice(0, 4));
   const targetMonth = parseInt(targetMonthDate.slice(5, 7));
   const existingInTarget = await fetchMonthlyEntries(targetYear, targetMonth);
 
-  const newEntry = await createEntry({
-    type: original.type,
-    content: original.content,
-    log_type: logType,
-    date: targetMonthDate,
-    position: existingInTarget.length,
-  });
-
-  if (newEntry) {
-    await updateEntry(entryId, { status: 'scheduled' });
-  }
-
-  return newEntry;
-}
-
-// ── Bidirectional sync ──
-
-/**
- * When a daily entry's status changes, sync to its parent monthly entry (via parent_id).
- */
-export async function syncStatusToParent(dailyEntryId: string, newStatus: EntryStatus): Promise<boolean> {
-  const { data: daily } = await supabase()
+  // Create new monthly entry in target month (unlinked)
+  const { data: newEntry, error } = await supabase()
     .from('entries')
-    .select('parent_id')
-    .eq('id', dailyEntryId)
+    .insert({
+      user_id: user.id,
+      type: original.type,
+      content: original.content,
+      log_type: 'monthly',
+      date: targetMonthDate,
+      position: existingInTarget.length,
+    })
+    .select()
     .single();
 
-  if (!daily?.parent_id) return false;
-
-  return updateEntry(daily.parent_id, { status: newStatus });
+  if (error) return null;
+  return newEntry as Entry;
 }
 
 /**
- * When a monthly entry's status changes, sync to any linked daily entry.
+ * Migrate all incomplete past tasks to today.
  */
-export async function syncStatusToChild(monthlyEntryId: string, newStatus: EntryStatus): Promise<boolean> {
-  const { data: children } = await supabase()
-    .from('entries')
-    .select('id')
-    .eq('parent_id', monthlyEntryId)
-    .eq('log_type', 'daily');
-
-  if (!children || children.length === 0) return false;
-
-  let ok = true;
-  for (const child of children) {
-    const result = await updateEntry(child.id, { status: newStatus });
-    if (!result) ok = false;
-  }
-  return ok;
-}
-
-// ── Migration helpers ──
-
-export async function migrateEntry(id: string, newDate: string): Promise<Entry | null> {
-  await updateEntry(id, { status: 'migrated' });
-  
-  const { data: original } = await supabase()
-    .from('entries')
-    .select('*')
-    .eq('id', id)
-    .single();
-  
-  if (!original) return null;
-  
-  return createEntry({
-    type: original.type,
-    content: original.content,
-    log_type: 'daily',
-    date: newDate,
-    position: 9999,
-  });
-}
-
 export async function migrateAllIncomplete(fromBefore: string, toDate: string): Promise<number> {
   const { data: incomplete } = await supabase()
     .from('entries')
@@ -396,6 +420,37 @@ export async function migrateAllIncomplete(fromBefore: string, toDate: string): 
     if (result) count++;
   }
   return count;
+}
+
+// ── Bidirectional sync ──
+
+export async function syncStatusToParent(dailyEntryId: string, newStatus: EntryStatus): Promise<boolean> {
+  const { data: daily } = await supabase()
+    .from('entries')
+    .select('parent_id')
+    .eq('id', dailyEntryId)
+    .single();
+
+  if (!daily?.parent_id) return false;
+
+  return updateEntry(daily.parent_id, { status: newStatus });
+}
+
+export async function syncStatusToChild(monthlyEntryId: string, newStatus: EntryStatus): Promise<boolean> {
+  const { data: children } = await supabase()
+    .from('entries')
+    .select('id')
+    .eq('parent_id', monthlyEntryId)
+    .eq('log_type', 'daily');
+
+  if (!children || children.length === 0) return false;
+
+  let ok = true;
+  for (const child of children) {
+    const result = await updateEntry(child.id, { status: newStatus });
+    if (!result) ok = false;
+  }
+  return ok;
 }
 
 // Keep for backward compat with pull-from-monthly

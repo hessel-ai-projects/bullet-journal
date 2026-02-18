@@ -136,7 +136,6 @@ export function CustomCollection({ collectionId }: { collectionId: string }) {
   const statusIcon = (entry: Entry) => {
     if (entry.status === 'done') return '×';
     if (entry.status === 'migrated') return '>';
-    if (entry.status === 'scheduled') return '<';
     return bulletSymbol[entry.type];
   };
 

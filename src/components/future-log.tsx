@@ -42,7 +42,6 @@ function getCurrentAnd6Months() {
 function statusIcon(entry: Entry) {
   if (entry.status === 'done') return '×';
   if (entry.status === 'migrated') return '>';
-  if (entry.status === 'scheduled') return '<';
   if (entry.status === 'cancelled') return '•';
   return bulletSymbol[entry.type];
 }
@@ -154,7 +153,6 @@ export function FutureLog() {
                       'flex-1 truncate text-xs',
                       entry.status === 'done' && 'line-through text-muted-foreground',
                       entry.status === 'cancelled' && 'line-through text-muted-foreground/60',
-                      entry.status === 'scheduled' && 'italic text-muted-foreground',
                     )}>
                       {entry.content}
                     </span>

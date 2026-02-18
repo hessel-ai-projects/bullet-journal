@@ -32,23 +32,24 @@
 | D8 | Prefix `-` creates a **note** (`–`) | ✅ | `- Remember this` → note |
 | D9 | User can complete a task | ✅ | Via `⋯` dropdown → Complete. Symbol changes to `×`, text gets strikethrough |
 | D10 | User can cancel a task | ✅ | Via `⋯` dropdown → Cancel. Symbol stays `•`, text gets strikethrough + muted |
-| D11 | User can migrate a task to another day | ✅ | Via `⋯` dropdown → Migrate to day. Opens calendar picker. Original marked `migrated` (`>`), copy created at target date |
+| D11 | User can migrate a task to another day or month | ✅ | Via `⋯` dropdown → "Migrate to day" (same month, reuses monthly parent) or "Migrate to month" (future month, marks old daily+monthly as migrated, creates new monthly entry in target) |
 | D12 | User can inline-edit entry content by clicking it | ✅ | Click content → input field. Enter to save, Escape to cancel, blur to save |
 | D13 | Content edits sync bidirectionally | ✅ | If entry has `parent_id` (linked to monthly), parent updates. If entry has children, children update. Uses `updateEntryWithSync` |
 | D14 | User can delete an entry | ✅ | Hover → delete button (desktop), swipe-to-delete (mobile). Uses `deleteEntryWithSync` |
 | D15 | Deleting syncs bidirectionally | ✅ | Deletes linked parent AND children |
 | D16 | User can create subtasks with Tab/Shift+Tab | ⚠️ | Tab indents (sets `parent_id` to last root entry). Shift+Tab outdents. Visual indent only 1 level deep |
 | D17 | Past incomplete tasks are flagged when viewing today | ✅ | Yellow banner at top showing incomplete tasks from previous days |
-| D18 | User can migrate individual past incomplete tasks to today | ✅ | "Migrate" button per task in the banner |
-| D19 | User can bulk-migrate all incomplete past tasks to today | ✅ | "Migrate all to today" button |
+| D18 | User can migrate individual past incomplete tasks to today | ✅ | "Migrate" button per task in the banner. Same month: reuses monthly parent, updates date. Cross-month: marks old daily+monthly as migrated, creates new monthly parent + daily entry in current month |
+| D19 | User can bulk-migrate all incomplete past tasks to today | ✅ | "Migrate all to today" button. Same cross-month logic as D18 |
 | D20 | User can pull unassigned monthly tasks into today | ✅ | "Monthly" button → dialog showing open monthly tasks → checkbox select → "Add to today" |
 | D21 | Completing/cancelling a daily task syncs to its parent monthly task | ✅ | Via `syncStatusToParent` |
 | D22 | Entries update in realtime via Supabase subscription | ✅ | Channel listens to `entries` table changes for current date |
+| D23 | Tasks created in the daily log automatically get a monthly parent entry. Both sync bidirectionally (content, status, delete) | ✅ | Monthly entry: log_type='monthly', date=YYYY-MM-01, status='migrated'. Daily entry gets parent_id → monthly. Only tasks, not events/notes |
 
 ### Daily Log Rules
 - Entry types: `task` (default), `event` (`*` prefix), `note` (`-` prefix)
 - Symbols: task=`•`, event=`⚬`, note=`–`
-- Status symbols: open=type symbol, done=`×`, migrated=`>`, scheduled=`<`, cancelled=`•` (strikethrough)
+- Status symbols: open=type symbol, done=`×`, migrated=`>`, cancelled=`•` (strikethrough)
 - Status transitions are EXPLICIT (via dropdown), NOT click-to-cycle
 - All deletes use `deleteEntryWithSync` (cascades to linked entries)
 - All content edits use `updateEntryWithSync` (syncs to linked entries)
@@ -74,8 +75,8 @@
 | M12 | User can cancel a monthly task | ✅ | Via `⋯` dropdown → Cancel. Syncs to linked daily entry if planned |
 | M13 | User can plan a monthly task to a specific day | ✅ | Via `⋯` dropdown → Plan to day → day picker grid (1-31). Creates daily entry with `parent_id`. Max ONE day per task. Monthly task status → `migrated` (`>`) |
 | M14 | Planned day shows as badge on the monthly task | ✅ | Clickable badge → jumps to that day |
-| M15 | User can move a monthly task to another month | ✅ | Via `⋯` dropdown → Move to month → inline month picker panel. Original marked `scheduled` (`<`), copy created in target month |
-| M16 | User can delete a monthly task | ✅ | Delete button shown for terminal states (done/cancelled/scheduled). Uses `deleteEntryWithSync` |
+| M15 | User can migrate a monthly task to another month | ✅ | Via `⋯` dropdown → Migrate to month → inline month picker panel. Original marked `migrated` (`>`), new monthly entry created in target month (unlinked) |
+| M16 | User can delete a monthly task | ✅ | Delete button shown for terminal states (done/cancelled/migrated without children). Uses `deleteEntryWithSync` |
 | M17 | Status changes on monthly tasks sync to linked daily entries | ✅ | Via `syncStatusToChild` |
 
 ### Monthly Log Rules
@@ -84,7 +85,7 @@
 - Monthly tasks use `log_type='monthly'`, `date=YYYY-MM-01`
 - Planning to a day: max ONE day per monthly task (upserts if already planned)
 - Bidirectional sync: monthly ↔ daily via `parent_id` link
-- `⋯` dropdown actions: Complete, Cancel, Plan to day, Move to month (NO click-to-cycle)
+- `⋯` dropdown actions: Complete, Cancel, Plan to day, Migrate to month (NO click-to-cycle)
 
 ---
 
@@ -219,11 +220,10 @@
 ### Status States & Symbols
 | Status | Symbol | Visual | Can transition to |
 |--------|--------|--------|-------------------|
-| open | type symbol | normal text | done, cancelled, migrated, scheduled |
+| open | type symbol | normal text | done, cancelled, migrated |
 | done | `×` | strikethrough | — (terminal) |
 | cancelled | `•` | strikethrough + muted | — (terminal) |
-| migrated | `>` | normal | — (terminal, linked daily entry exists) |
-| scheduled | `<` | italic + muted | — (terminal, moved to another month) |
+| migrated | `>` | normal | — (terminal, covers both "planned to day" and "moved to another month") |
 
 ### Bidirectional Sync Rules
 1. **Content sync**: Editing content on any linked entry updates all linked entries (`updateEntryWithSync`)
