@@ -20,13 +20,27 @@ export async function fetchCollection(id: string): Promise<Collection | null> {
   return data as Collection | null;
 }
 
+const BUILT_IN_COLLECTIONS: Record<string, { name: string; icon: string }> = {
+  meetings: { name: 'Meeting Notes', icon: '📋' },
+  ideas: { name: 'Ideas', icon: '💡' },
+};
+
 export async function fetchCollectionByType(type: CollectionType): Promise<Collection | null> {
   const { data } = await supabase()
     .from('collections')
     .select('*')
     .eq('type', type)
     .single();
-  return data as Collection | null;
+
+  if (data) return data as Collection;
+
+  // Auto-create built-in collections if they don't exist
+  const builtin = BUILT_IN_COLLECTIONS[type];
+  if (builtin) {
+    return createCollection({ name: builtin.name, type, icon: builtin.icon });
+  }
+
+  return null;
 }
 
 export async function createCollection(params: {
