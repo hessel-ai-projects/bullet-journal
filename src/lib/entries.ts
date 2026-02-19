@@ -442,20 +442,11 @@ export async function migrateEntry(id: string, newDate: string): Promise<Entry |
     return migrateToMonth(id, targetMonthDate);
   }
 
-  // Same-month migration
+  // Same-month migration — daily tasks always have a parent_id (D23 invariant)
   const parentId = original.parent_id;
   if (!parentId) {
-    // No parent — simple date move
-    await updateEntry(id, { date: newDate, status: 'migrated' });
-    // Create new entry at target
-    const existing = await fetchEntriesForDate(newDate);
-    return createEntry({
-      type: original.type,
-      content: original.content,
-      log_type: 'daily',
-      date: newDate,
-      position: existing.length,
-    });
+    console.warn('migrateEntry: daily task without parent_id — this should not happen', id);
+    return null;
   }
 
   // Step 1: Check if a peer exists at target date
@@ -579,6 +570,11 @@ export async function migrateToMonth(entryId: string, targetMonthDate: string): 
   const { data: { user } } = await supabase().auth.getUser();
   if (!user) return null;
 
+  // Get position in target month
+  const targetYear = parseInt(targetMonthDate.slice(0, 4));
+  const targetMonth = parseInt(targetMonthDate.slice(5, 7));
+  const existingInTarget = await fetchMonthlyEntries(targetYear, targetMonth);
+
   // Create new monthly entry in target month (unlinked, YYYY-MM-01, open)
   const { data: newEntry, error } = await supabase()
     .from('entries')
@@ -588,7 +584,7 @@ export async function migrateToMonth(entryId: string, targetMonthDate: string): 
       content: original.content,
       log_type: 'monthly',
       date: targetMonthDate.slice(0, 7) + '-01',
-      position: 0,  // will be at top; could improve later
+      position: existingInTarget.length,
       status: 'open',
     })
     .select()

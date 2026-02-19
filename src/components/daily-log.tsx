@@ -99,7 +99,6 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
   const [calendarOpen, setCalendarOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const editRef = useRef<HTMLInputElement>(null);
-  const [indentLevel, setIndentLevel] = useState(0);
   const [pullOpen, setPullOpen] = useState(false);
   const [monthlyTasks, setMonthlyTasks] = useState<Entry[]>([]);
   const [selectedMonthly, setSelectedMonthly] = useState<Set<string>>(new Set());
@@ -183,14 +182,6 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
   const handleAdd = async () => {
     if (!input.trim()) return;
     const { type, content } = parseEntryPrefix(input);
-    
-    let parentId: string | null = null;
-    if (indentLevel > 0 && entries.length > 0) {
-      const rootEntries = entries.filter(e => !e.parent_id);
-      if (rootEntries.length > 0) {
-        parentId = rootEntries[rootEntries.length - 1].id;
-      }
-    }
 
     const entry = await createEntry({
       type,
@@ -198,12 +189,10 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
       log_type: 'daily',
       date,
       position: entries.length,
-      parent_id: parentId,
     });
     if (entry) {
       setEntries(prev => [...prev, entry]);
       setInput('');
-      setIndentLevel(0);
     }
   };
 
@@ -211,13 +200,6 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
     if (e.key === 'Enter') {
       e.preventDefault();
       handleAdd();
-    } else if (e.key === 'Tab') {
-      e.preventDefault();
-      if (e.shiftKey) {
-        setIndentLevel(prev => Math.max(0, prev - 1));
-      } else {
-        setIndentLevel(prev => Math.min(2, prev + 1));
-      }
     }
   };
 
@@ -306,26 +288,6 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
     setDate(d);
     setEditingId(null);
     setInput('');
-    setIndentLevel(0);
-  };
-
-  const getDepth = (entry: Entry): number => {
-    return entry.parent_id ? 1 : 0;
-  };
-
-  const organizedEntries = () => {
-    const roots = entries.filter(e => !e.parent_id);
-    const result: Entry[] = [];
-    for (const root of roots) {
-      result.push(root);
-      const children = entries.filter(e => e.parent_id === root.id);
-      result.push(...children);
-    }
-    const ids = new Set(result.map(e => e.id));
-    for (const e of entries) {
-      if (!ids.has(e.id)) result.push(e);
-    }
-    return result;
   };
 
   const [touchStart, setTouchStart] = useState<{ id: string; x: number } | null>(null);
@@ -384,9 +346,6 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
       {/* Rapid logging input */}
       <div className="flex items-center gap-2">
         <div className="flex items-center gap-2 border rounded-md p-2 bg-card flex-1">
-          {indentLevel > 0 && (
-            <span className="text-muted-foreground text-xs">{'→'.repeat(indentLevel)}</span>
-          )}
           <input
             ref={inputRef}
             type="text"
@@ -489,8 +448,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
               No entries yet. Start logging your day.
             </p>
           )}
-          {organizedEntries().map((entry) => {
-            const depth = getDepth(entry);
+          {entries.map((entry) => {
             const isSwiped = swipedId === entry.id;
             const isNote = entry.type === 'note';
             const isActionable = entry.status === 'open';
@@ -506,7 +464,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
                   'group flex items-start gap-2 py-1.5 px-2 rounded-md hover:bg-accent/50 transition-all relative',
                   isSwiped && 'translate-x-[-60px]'
                 )}
-                style={{ paddingLeft: `${8 + depth * 24}px` }}
+                style={{ paddingLeft: '8px' }}
                 onTouchStart={(e) => setTouchStart({ id: entry.id, x: e.touches[0].clientX })}
                 onTouchMove={(e) => {
                   if (touchStart?.id === entry.id) {
