@@ -154,7 +154,7 @@ export async function fetchActionItems(meetingNoteId: string, collectionId: stri
 
 export async function createActionItem(params: {
   collection_id: string;
-  parent_id: string; // meeting_note id (stored in tags, not FK)
+  meeting_note_id: string; // stored in tags, not FK
   content: string;
   position: number;
 }): Promise<Entry | null> {
@@ -175,7 +175,7 @@ export async function createActionItem(params: {
       collection_id: params.collection_id,
       date: monthStr,
       position: params.position,
-      tags: [`meeting:${params.parent_id}`],
+      tags: [`meeting:${params.meeting_note_id}`],
     })
     .select()
     .single();

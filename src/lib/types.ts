@@ -26,7 +26,8 @@ export interface Entry {
   log_type: LogType;
   collection_id: string | null;
   date: string;
-  parent_id: string | null;
+  monthly_id: string | null;
+  task_uid: string;
   tags: string[];
   position: number;
   google_event_id: string | null;

@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Entry not found' }, { status: 404 });
   }
 
-  // Create migrated copy
+  // Create migrated copy with same task_uid
   const { data: migrated, error: insertError } = await supabase
     .from('entries')
     .insert({
@@ -51,7 +51,8 @@ export async function POST(request: NextRequest) {
       log_type: log_type ?? original.log_type,
       collection_id: original.collection_id,
       date: date ?? original.date,
-      parent_id: original.parent_id,
+      monthly_id: original.monthly_id,
+      task_uid: original.task_uid,  // same chain
       tags: original.tags,
       position: 0,
       source: 'jarvis',

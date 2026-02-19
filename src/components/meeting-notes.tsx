@@ -165,7 +165,7 @@ function ActionItemsSection({
     if (!input.trim()) return;
     const item = await createActionItem({
       collection_id: collectionId,
-      parent_id: meetingNoteId,
+      meeting_note_id: meetingNoteId,
       content: input.trim(),
       position: items.length,
     });

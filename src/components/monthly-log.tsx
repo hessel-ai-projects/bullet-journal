@@ -28,7 +28,7 @@ import {
   migrateToMonth,
   syncStatusToChild,
   fetchAssignedDays,
-  fetchChildResolutions,
+  fetchChainResolutions,
 } from '@/lib/entries';
 import type { EntryStatus } from '@/lib/types';
 
@@ -101,14 +101,22 @@ export function MonthlyLog() {
     loadAssigned();
   }, [monthlyTasks]);
 
-  // Load child resolutions for migrated monthly entries
+  // Load chain resolutions for migrated monthly entries
   useEffect(() => {
-    const migratedIds = monthlyTasks.filter(e => e.status === 'migrated').map(e => e.id);
-    if (migratedIds.length === 0) {
+    const migrated = monthlyTasks.filter(e => e.status === 'migrated');
+    const uids = Array.from(new Set(migrated.map(e => e.task_uid)));
+    if (uids.length === 0) {
       setChildResolutions({});
       return;
     }
-    fetchChildResolutions(migratedIds).then(setChildResolutions);
+    fetchChainResolutions(uids).then(res => {
+      // Map back to entry IDs for the component
+      const byId: Record<string, EntryStatus> = {};
+      for (const entry of migrated) {
+        if (res[entry.task_uid]) byId[entry.id] = res[entry.task_uid];
+      }
+      setChildResolutions(byId);
+    });
   }, [monthlyTasks]);
 
   const handleComplete = async (entry: Entry) => {

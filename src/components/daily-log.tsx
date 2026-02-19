@@ -36,7 +36,7 @@ import {
   migrateAllIncomplete,
   fetchUnassignedMonthlyTasks,
   assignMonthlyTaskToDay,
-  fetchParentStatuses,
+  fetchChainResolutions,
 } from '@/lib/entries';
 
 function formatDate(dateStr: string) {
@@ -105,7 +105,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
   const [pullingMonthly, setPullingMonthly] = useState(false);
   const [migrateCalendarId, setMigrateCalendarId] = useState<string | null>(null);
   const [migrateMonthId, setMigrateMonthId] = useState<string | null>(null);
-  const [parentStatuses, setParentStatuses] = useState<Record<string, EntryStatus>>({});
+  const [chainResolutions, setChainResolutions] = useState<Record<string, EntryStatus>>({});
 
   const today = new Date().toISOString().split('T')[0];
 
@@ -124,15 +124,15 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
     loadEntries(date);
   }, [date, loadEntries]);
 
-  // Load parent statuses for migrated entries (to show resolved visual)
+  // Load chain resolutions for migrated entries
   useEffect(() => {
-    const migratedWithParent = entries.filter(e => e.status === 'migrated' && e.parent_id);
-    const parentIds = Array.from(new Set(migratedWithParent.map(e => e.parent_id!)));
-    if (parentIds.length === 0) {
-      setParentStatuses({});
+    const migrated = entries.filter(e => e.status === 'migrated');
+    const uids = Array.from(new Set(migrated.map(e => e.task_uid)));
+    if (uids.length === 0) {
+      setChainResolutions({});
       return;
     }
-    fetchParentStatuses(parentIds).then(setParentStatuses);
+    fetchChainResolutions(uids).then(setChainResolutions);
   }, [entries]);
 
   const loadMonthlyTasks = async () => {
@@ -206,7 +206,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
   const handleComplete = async (entry: Entry) => {
     const ok = await completeEntry(entry.id);
     if (ok) {
-      if (entry.parent_id) {
+      if (entry.monthly_id) {
         await syncStatusToParent(entry.id, 'done');
       }
       setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'done' } : e));
@@ -217,7 +217,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
   const handleCancel = async (entry: Entry) => {
     const ok = await cancelEntry(entry.id);
     if (ok) {
-      if (entry.parent_id) {
+      if (entry.monthly_id) {
         await syncStatusToParent(entry.id, 'cancelled');
       }
       setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'cancelled' } : e));
@@ -298,10 +298,8 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
    * Returns 'done' | 'cancelled' | null (still open/migrated chain).
    */
   const getMigratedResolution = (entry: Entry): EntryStatus | null => {
-    if (entry.status !== 'migrated' || !entry.parent_id) return null;
-    const parentStatus = parentStatuses[entry.parent_id];
-    if (parentStatus === 'done' || parentStatus === 'cancelled') return parentStatus;
-    return null;
+    if (entry.status !== 'migrated') return null;
+    return chainResolutions[entry.task_uid] ?? null;
   };
 
   const getMigrateCalendarEntry = () => entries.find(e => e.id === migrateCalendarId);
