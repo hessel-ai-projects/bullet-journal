@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
@@ -19,6 +18,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import {
   parseEntryPrefix,
   bulletSymbol,
@@ -67,7 +76,7 @@ const statusStyles: Record<EntryStatus, string> = {
   open: '',
   done: 'line-through text-muted-foreground',
   migrated: 'text-muted-foreground',
-  cancelled: 'line-through text-muted-foreground/60',
+  cancelled: 'line-through text-muted-foreground/70',
 };
 
 function getNext6Months(currentDate: string) {
@@ -106,6 +115,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
   const [migrateCalendarId, setMigrateCalendarId] = useState<string | null>(null);
   const [migrateMonthId, setMigrateMonthId] = useState<string | null>(null);
   const [chainResolutions, setChainResolutions] = useState<Record<string, EntryStatus>>({});
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const today = new Date().toISOString().split('T')[0];
 
@@ -211,6 +221,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
       }
       setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'done' } : e));
       toast('Completed');
+      inputRef.current?.focus();
     }
   };
 
@@ -222,15 +233,23 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
       }
       setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'cancelled' } : e));
       toast('Cancelled');
+      inputRef.current?.focus();
     }
   };
 
-  const handleDelete = async (id: string) => {
-    const ok = await deleteEntryWithSync(id);
+  const requestDelete = (id: string) => {
+    setDeleteConfirmId(id);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirmId) return;
+    const ok = await deleteEntryWithSync(deleteConfirmId);
     if (ok) {
-      setEntries(prev => prev.filter(e => e.id !== id));
+      setEntries(prev => prev.filter(e => e.id !== deleteConfirmId));
       toast('Entry deleted');
+      inputRef.current?.focus();
     }
+    setDeleteConfirmId(null);
   };
 
   const startEdit = (entry: Entry) => {
@@ -309,7 +328,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
     <div className="space-y-4">
       {/* Date navigation */}
       <div className="flex items-center gap-2">
-        <Button variant="ghost" size="sm" onClick={() => navigateDate(addDays(date, -1))}>
+        <Button variant="ghost" size="sm" onClick={() => navigateDate(addDays(date, -1))} aria-label="Previous day">
           ←
         </Button>
         <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
@@ -331,7 +350,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
             />
           </PopoverContent>
         </Popover>
-        <Button variant="ghost" size="sm" onClick={() => navigateDate(addDays(date, 1))}>
+        <Button variant="ghost" size="sm" onClick={() => navigateDate(addDays(date, 1))} aria-label="Next day">
           →
         </Button>
         {date !== today && (
@@ -352,6 +371,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
             onKeyDown={handleKeyDown}
             placeholder="Type and press Enter ● prefix: - note, * event"
             className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+            aria-label="Add entry"
             autoFocus
           />
         </div>
@@ -478,8 +498,8 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
                     'mt-0.5 w-5 h-5 flex items-center justify-center text-sm shrink-0',
                     entry.status === 'done' && 'text-muted-foreground',
                     entry.status === 'migrated' && 'text-muted-foreground',
-                    entry.status === 'cancelled' && 'text-muted-foreground/60',
-                    migratedResolved && 'text-muted-foreground/60',
+                    entry.status === 'cancelled' && 'text-muted-foreground/70',
+                    migratedResolved && 'text-muted-foreground/70',
                   )}
                   title={`${entry.type} — ${entry.status}${resolution ? ` (${resolution})` : ''}`}
                 >
@@ -497,6 +517,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
                       if (e.key === 'Escape') setEditingId(null);
                     }}
                     className="flex-1 bg-transparent text-sm text-foreground outline-none border-b border-primary/20"
+                    aria-label="Edit entry content"
                   />
                 ) : (
                   <span
@@ -504,7 +525,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
                     className={cn(
                       'flex-1 text-sm transition-colors',
                       isMigrated ? 'cursor-default' : 'cursor-text',
-                      migratedResolved ? 'line-through text-muted-foreground/60' : statusStyles[entry.status],
+                      migratedResolved ? 'line-through text-muted-foreground/70' : statusStyles[entry.status],
                     )}
                   >
                     {entry.content}
@@ -516,7 +537,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
                   {/* Notes: only delete, no status actions */}
                   {isNote && (
                     <button
-                      onClick={() => handleDelete(entry.id)}
+                      onClick={() => requestDelete(entry.id)}
                       className="text-xs text-muted-foreground hover:text-destructive px-1"
                       title="Delete"
                     >
@@ -546,7 +567,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
                           <span className="mr-2">→</span> Migrate to month
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={() => handleDelete(entry.id)} className="text-destructive">
+                        <DropdownMenuItem onClick={() => requestDelete(entry.id)} className="text-destructive">
                           <span className="mr-2">🗑</span> Delete
                         </DropdownMenuItem>
                       </DropdownMenuContent>
@@ -555,7 +576,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
                   {/* Terminal tasks/events: just delete */}
                   {!isNote && isTerminal && (
                     <button
-                      onClick={() => handleDelete(entry.id)}
+                      onClick={() => requestDelete(entry.id)}
                       className="text-xs text-muted-foreground hover:text-destructive px-1"
                       title="Delete"
                     >
@@ -567,7 +588,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
                 {/* Swipe delete button (mobile) */}
                 {isSwiped && (
                   <button
-                    onClick={() => { handleDelete(entry.id); setSwipedId(null); }}
+                    onClick={() => { requestDelete(entry.id); setSwipedId(null); }}
                     className="absolute right-0 top-0 bottom-0 w-[56px] bg-destructive text-destructive-foreground flex items-center justify-center text-xs rounded-r-md"
                   >
                     Delete
@@ -590,7 +611,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
           <div className="border rounded-md p-3 bg-card space-y-2">
             <div className="flex items-center justify-between">
               <p className="text-xs font-medium">Migrate to which day?</p>
-              <button onClick={() => setMigrateCalendarId(null)} className="text-xs text-muted-foreground hover:text-foreground">✕</button>
+              <button onClick={() => setMigrateCalendarId(null)} className="text-xs text-muted-foreground hover:text-foreground" aria-label="Close">✕</button>
             </div>
             <Calendar
               mode="single"
@@ -616,7 +637,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
           <div className="border rounded-md p-3 bg-card space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs text-muted-foreground">Migrate &ldquo;{entry.content}&rdquo; to:</span>
-              <button onClick={() => setMigrateMonthId(null)} className="text-xs text-muted-foreground hover:text-foreground">✕</button>
+              <button onClick={() => setMigrateMonthId(null)} className="text-xs text-muted-foreground hover:text-foreground" aria-label="Close">✕</button>
             </div>
             <div className="grid grid-cols-3 gap-1">
               {futureMonths.map(m => (
@@ -632,6 +653,22 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
           </div>
         );
       })()}
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={!!deleteConfirmId} onOpenChange={(open) => { if (!open) setDeleteConfirmId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete entry?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete this task and all its copies across all months (entire chain).
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

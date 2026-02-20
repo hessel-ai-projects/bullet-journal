@@ -74,10 +74,13 @@ export async function fetchMonthlyEntries(year: number, month: number): Promise<
  * Fetch future log entries. Queries log_type IN ['future', 'monthly'].
  */
 export async function fetchFutureEntries(): Promise<Entry[]> {
+  const now = new Date();
+  const currentMonthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
   const { data } = await supabase()
     .from('entries')
     .select('*')
     .in('log_type', ['future', 'monthly'])
+    .gte('date', currentMonthStart)
     .order('date', { ascending: true })
     .order('position', { ascending: true });
   return (data ?? []) as Entry[];

@@ -16,6 +16,16 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   bulletSymbol,
   parseEntryPrefix,
   fetchEntriesForMonth,
@@ -64,6 +74,7 @@ export function MonthlyLog() {
   const [planningId, setPlanningId] = useState<string | null>(null);
   const [movingId, setMovingId] = useState<string | null>(null);
   const [childResolutions, setChildResolutions] = useState<Record<string, EntryStatus>>({});
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const monthName = new Date(year, month - 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   const daysInMonth = new Date(year, month, 0).getDate();
@@ -177,11 +188,11 @@ export function MonthlyLog() {
 
   const addMonthlyTask = async () => {
     if (!input.trim()) return;
-    const { type, content } = parseEntryPrefix(input);
-    // Monthly tasks created here use YYYY-MM-01 (unassigned)
+    const { content } = parseEntryPrefix(input);
+    // Monthly tasks panel is tasks only — ignore prefix type
     const monthStr = `${year}-${String(month).padStart(2, '0')}-01`;
     const entry = await createEntry({
-      type,
+      type: 'task',
       content,
       log_type: 'monthly',
       date: monthStr,
@@ -194,12 +205,18 @@ export function MonthlyLog() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    const ok = await deleteEntryWithSync(id);
+  const requestDelete = (id: string) => {
+    setDeleteConfirmId(id);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirmId) return;
+    const ok = await deleteEntryWithSync(deleteConfirmId);
     if (ok) {
-      setMonthlyTasks(prev => prev.filter(e => e.id !== id));
+      setMonthlyTasks(prev => prev.filter(e => e.id !== deleteConfirmId));
       toast('Deleted');
     }
+    setDeleteConfirmId(null);
   };
 
   const entriesByDay = (day: number) => {
@@ -225,9 +242,9 @@ export function MonthlyLog() {
     <div className="space-y-4">
       {/* Month nav */}
       <div className="flex items-center gap-2">
-        <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>←</Button>
+        <Button variant="ghost" size="sm" onClick={() => navigate(-1)} aria-label="Previous month">←</Button>
         <span className="text-lg font-semibold min-w-[180px] text-center">{monthName}</span>
-        <Button variant="ghost" size="sm" onClick={() => navigate(1)}>→</Button>
+        <Button variant="ghost" size="sm" onClick={() => navigate(1)} aria-label="Next month">→</Button>
       </div>
 
       <div className="grid md:grid-cols-2 gap-6">
@@ -262,7 +279,7 @@ export function MonthlyLog() {
                     {dayEvents.slice(0, 3).map(e => e.content).join(' · ')}
                   </span>
                   {dayTaskCount > 0 && (
-                    <span className="text-xs text-muted-foreground/60">{dayTaskCount} ●</span>
+                    <span className="text-xs text-muted-foreground/70">{dayTaskCount} ●</span>
                   )}
                 </div>
               );
@@ -281,6 +298,7 @@ export function MonthlyLog() {
               onKeyDown={(e) => e.key === 'Enter' && addMonthlyTask()}
               placeholder="Add a task for this month..."
               className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+              aria-label="Add monthly task"
             />
           </div>
 
@@ -303,7 +321,7 @@ export function MonthlyLog() {
                     'w-5 h-5 flex items-center justify-center text-sm shrink-0 mt-0.5',
                     (entry.status === 'done' || entry.status === 'cancelled') && 'text-muted-foreground',
                     isMigrated && !migratedResolved && 'text-muted-foreground',
-                    migratedResolved && 'text-muted-foreground/60',
+                    migratedResolved && 'text-muted-foreground/70',
                   )}
                     title={resolution ? `migrated (${resolution})` : entry.status}
                   >
@@ -313,9 +331,9 @@ export function MonthlyLog() {
                     <span className={cn(
                       'text-sm',
                       entry.status === 'done' && 'line-through text-muted-foreground',
-                      entry.status === 'cancelled' && 'line-through text-muted-foreground/60',
+                      entry.status === 'cancelled' && 'line-through text-muted-foreground/70',
                       isMigrated && !migratedResolved && 'text-muted-foreground',
-                      migratedResolved && 'line-through text-muted-foreground/60',
+                      migratedResolved && 'line-through text-muted-foreground/70',
                     )}>
                       {entry.content}
                     </span>
@@ -355,7 +373,7 @@ export function MonthlyLog() {
                             <span className="mr-2">→</span> Migrate to month
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
-                          <DropdownMenuItem onClick={() => handleDelete(entry.id)} className="text-destructive">
+                          <DropdownMenuItem onClick={() => requestDelete(entry.id)} className="text-destructive">
                             <span className="mr-2">🗑</span> Delete
                           </DropdownMenuItem>
                         </DropdownMenuContent>
@@ -364,7 +382,7 @@ export function MonthlyLog() {
                     {/* Terminal: just delete */}
                     {isTerminal && (
                       <button
-                        onClick={() => handleDelete(entry.id)}
+                        onClick={() => requestDelete(entry.id)}
                         className="text-xs text-muted-foreground hover:text-destructive px-1"
                         title="Delete"
                       >
@@ -386,7 +404,7 @@ export function MonthlyLog() {
               <div className="border rounded-md p-3 bg-card space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-muted-foreground">Migrate &ldquo;{entry.content}&rdquo; to:</span>
-                  <button onClick={() => setMovingId(null)} className="text-xs text-muted-foreground hover:text-foreground">✕</button>
+                  <button onClick={() => setMovingId(null)} className="text-xs text-muted-foreground hover:text-foreground" aria-label="Close">✕</button>
                 </div>
                 <div className="grid grid-cols-3 gap-1">
                   {futureMonths.map(m => (
@@ -413,7 +431,7 @@ export function MonthlyLog() {
               <div className="border rounded-md p-3 bg-card space-y-2">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-medium">Plan &ldquo;{entry.content}&rdquo; to day:</p>
-                  <button onClick={() => setPlanningId(null)} className="text-xs text-muted-foreground hover:text-foreground">✕</button>
+                  <button onClick={() => setPlanningId(null)} className="text-xs text-muted-foreground hover:text-foreground" aria-label="Close">✕</button>
                 </div>
                 <div className="grid grid-cols-7 gap-1">
                   {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(d => {
@@ -422,6 +440,7 @@ export function MonthlyLog() {
                       <button
                         key={d}
                         onClick={() => handlePlanToDay(entry, d)}
+                        aria-label={`Plan to day ${d}`}
                         className={cn(
                           'w-7 h-7 text-xs rounded hover:bg-accent transition-colors',
                           isAssigned && 'bg-primary/20 text-primary font-medium',
@@ -437,6 +456,22 @@ export function MonthlyLog() {
           })()}
         </div>
       </div>
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={!!deleteConfirmId} onOpenChange={(open) => { if (!open) setDeleteConfirmId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete task?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete this task and all its copies across all months (entire chain).
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

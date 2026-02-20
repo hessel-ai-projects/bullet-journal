@@ -14,6 +14,16 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   bulletSymbol,
   fetchFutureEntries,
   createEntry,
@@ -48,6 +58,7 @@ export function FutureLog() {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
   const [inputs, setInputs] = useState<Record<string, string>>({});
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const months = getCurrentAnd6Months();
 
   const load = useCallback(async () => {
@@ -97,12 +108,18 @@ export function FutureLog() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    const ok = await deleteEntryWithSync(id);
+  const requestDelete = (id: string) => {
+    setDeleteConfirmId(id);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirmId) return;
+    const ok = await deleteEntryWithSync(deleteConfirmId);
     if (ok) {
-      setEntries(prev => prev.filter(e => e.id !== id));
+      setEntries(prev => prev.filter(e => e.id !== deleteConfirmId));
       toast('Deleted');
     }
+    setDeleteConfirmId(null);
   };
 
   const goToMonth = (year: number, month: number) => {
@@ -147,12 +164,12 @@ export function FutureLog() {
                     <span className={cn(
                       'flex-1 truncate text-xs',
                       entry.status === 'done' && 'line-through text-muted-foreground',
-                      entry.status === 'cancelled' && 'line-through text-muted-foreground/60',
+                      entry.status === 'cancelled' && 'line-through text-muted-foreground/70',
                       entry.status === 'migrated' && 'text-muted-foreground',
                     )}>
                       {entry.content}
                     </span>
-                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                       {isActionable ? (
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -167,14 +184,14 @@ export function FutureLog() {
                             <DropdownMenuItem onClick={() => handleCancel(entry)}>
                               <span className="mr-2">✕</span> Cancel
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleDelete(entry.id)} className="text-destructive">
+                            <DropdownMenuItem onClick={() => requestDelete(entry.id)} className="text-destructive">
                               <span className="mr-2">🗑</span> Delete
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
                       ) : (
                         <button
-                          onClick={() => handleDelete(entry.id)}
+                          onClick={() => requestDelete(entry.id)}
                           className="text-xs text-muted-foreground hover:text-destructive"
                         >
                           🗑
@@ -192,10 +209,27 @@ export function FutureLog() {
               onKeyDown={(e) => e.key === 'Enter' && addEntry(m.dateStr)}
               placeholder="Add task..."
               className="w-full bg-transparent text-xs text-foreground border-b border-border/50 outline-none py-1 placeholder:text-muted-foreground"
+              aria-label={`Add task to ${m.label}`}
             />
           </div>
         );
       })}
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={!!deleteConfirmId} onOpenChange={(open) => { if (!open) setDeleteConfirmId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete task?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete this task and all its copies across all months.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

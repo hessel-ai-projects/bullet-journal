@@ -33,7 +33,7 @@ function SidebarContent({ collections, onNavigate }: { collections: Collection[]
     <div className="flex flex-col h-full">
       <div className="p-4 pb-2">
         <Link href="/" className="flex items-center gap-2" onClick={onNavigate}>
-          <span className="text-2xl font-bold">•</span>
+          <span className="text-2xl font-bold">●</span>
           <span className="text-lg font-semibold tracking-tight">Bullet Journal</span>
         </Link>
       </div>
