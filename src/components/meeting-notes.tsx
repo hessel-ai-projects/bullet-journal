@@ -354,7 +354,7 @@ export function MeetingNotes() {
           <DialogTrigger asChild>
             <Button>+ New Meeting</Button>
           </DialogTrigger>
-          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto" aria-describedby={undefined}>
             <DialogHeader>
               <DialogTitle>New Meeting Note</DialogTitle>
             </DialogHeader>
@@ -450,7 +450,7 @@ export function MeetingNotes() {
 
       {/* Edit dialog */}
       <Dialog open={!!editingMeeting} onOpenChange={(open) => !open && setEditingMeeting(null)}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto" aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle>Edit Meeting Note</DialogTitle>
           </DialogHeader>

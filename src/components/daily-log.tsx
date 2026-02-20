@@ -362,7 +362,7 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
               <span className="sm:hidden">📋</span>
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-md">
+          <DialogContent className="max-w-md" aria-describedby={undefined}>
             <DialogHeader>
               <DialogTitle>Pull from Monthly Tasks</DialogTitle>
             </DialogHeader>

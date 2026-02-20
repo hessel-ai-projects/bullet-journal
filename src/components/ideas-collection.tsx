@@ -225,7 +225,7 @@ export function IdeasCollection() {
 
       {/* Edit dialog */}
       <Dialog open={!!editingIdea} onOpenChange={(open) => !open && setEditingIdea(null)}>
-        <DialogContent>
+        <DialogContent aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle>Edit Idea</DialogTitle>
           </DialogHeader>

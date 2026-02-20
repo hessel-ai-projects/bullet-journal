@@ -262,7 +262,7 @@ export function CustomCollection({ collectionId }: { collectionId: string }) {
 
       {/* Edit collection dialog */}
       <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
-        <DialogContent>
+        <DialogContent aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle>Edit Collection</DialogTitle>
           </DialogHeader>
