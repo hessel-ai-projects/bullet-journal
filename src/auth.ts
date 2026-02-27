@@ -2,7 +2,7 @@ import NextAuth from 'next-auth';
 import Google from 'next-auth/providers/google';
 import { DrizzleAdapter } from '@auth/drizzle-adapter';
 import { db, allowedUsers, profiles } from '@/lib/db';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: DrizzleAdapter(db),
@@ -25,7 +25,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
 
       const allowed = await db.query.allowedUsers.findFirst({
-        where: eq(allowedUsers.email, user.email),
+        where: sql`LOWER(${allowedUsers.email}) = LOWER(${user.email})`,
       });
 
       if (!allowed) {
