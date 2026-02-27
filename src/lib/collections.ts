@@ -74,7 +74,7 @@ export async function createCollection(params: {
     const [data] = await db.insert(collections).values({
       userId,
       name: params.name,
-      type,
+      type: params.type,
       icon: params.icon,
       template: params.template,
     }).returning();
@@ -237,7 +237,7 @@ function mapCollectionFromDb(dbCollection: typeof collections.$inferSelect): Col
     name: dbCollection.name,
     type: dbCollection.type as CollectionType,
     icon: dbCollection.icon ?? '📋',
-    template: dbCollection.template,
+    template: dbCollection.template as Record<string, unknown> | null,
     created_at: dbCollection.createdAt.toISOString(),
   };
 }
@@ -258,7 +258,7 @@ function mapEntryFromDb(dbEntry: typeof entries.$inferSelect): Entry {
     tags: dbEntry.tags ?? [],
     position: dbEntry.position ?? 0,
     google_event_id: dbEntry.googleEventId,
-    source: dbEntry.source,
+    source: (dbEntry.source ?? 'user') as import('@/lib/types').EntrySource,
     created_at: dbEntry.createdAt.toISOString(),
     updated_at: dbEntry.updatedAt.toISOString(),
   };

@@ -259,12 +259,8 @@ export async function createEntry(params: {
     date: params.date,
     position: params.position,
     monthlyId,
+    taskUid: taskUid ?? crypto.randomUUID(),
   };
-
-  // Set task_uid if provided (from migration or D23), otherwise let DB default
-  if (taskUid) {
-    insertData.taskUid = taskUid;
-  }
 
   const [data] = await db.insert(entries).values(insertData).returning();
   
@@ -708,7 +704,7 @@ function mapEntryFromDb(dbEntry: typeof entries.$inferSelect): Entry {
     tags: dbEntry.tags ?? [],
     position: dbEntry.position ?? 0,
     google_event_id: dbEntry.googleEventId,
-    source: dbEntry.source,
+    source: (dbEntry.source ?? 'user') as import('@/lib/types').EntrySource,
     created_at: dbEntry.createdAt.toISOString(),
     updated_at: dbEntry.updatedAt.toISOString(),
   };
