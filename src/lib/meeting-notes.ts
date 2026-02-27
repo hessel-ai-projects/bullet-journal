@@ -72,7 +72,7 @@ export async function createMeetingNote(params: {
 
 export async function updateMeetingNote(
   id: string,
-  updates: Partial<Pick<MeetingNote, 'title' | 'attendees' | 'agenda' | 'notes'>>
+  updates: Partial<Pick<MeetingNote, 'title' | 'date' | 'attendees' | 'agenda' | 'notes'>>
 ): Promise<boolean> {
   const userId = await getCurrentUserId();
   if (!userId) return false;
