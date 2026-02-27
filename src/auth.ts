@@ -21,20 +21,33 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     signIn: async ({ user, account, profile }) => {
       // Check if user is in allowed_users whitelist
       if (!user.email) {
+        console.log('Sign-in rejected: No email provided');
         return false;
       }
 
-      const allowed = await db.query.allowedUsers.findFirst({
-        where: sql`LOWER(${allowedUsers.email}) = LOWER(${user.email})`,
-      });
+      try {
+        const normalizedEmail = user.email.toLowerCase().trim();
+        console.log(`Checking whitelist for: ${normalizedEmail}`);
 
-      if (!allowed) {
-        console.log(`Sign-in rejected: ${user.email} not in whitelist`);
+        // Get all allowed users and check manually (for debugging)
+        const allAllowed = await db.query.allowedUsers.findMany();
+        console.log('All allowed emails:', allAllowed.map(u => u.email));
+
+        const allowed = allAllowed.find(u => 
+          u.email.toLowerCase().trim() === normalizedEmail
+        );
+
+        if (!allowed) {
+          console.log(`Sign-in rejected: ${normalizedEmail} not in whitelist`);
+          return false;
+        }
+
+        console.log(`Sign-in allowed: ${normalizedEmail}`);
+        return true;
+      } catch (error) {
+        console.error('Database error during sign-in check:', error);
         return false;
       }
-
-      // User is whitelisted, allow sign in
-      return true;
     },
     session: async ({ session, token, user }) => {
       // Add user.id to session
