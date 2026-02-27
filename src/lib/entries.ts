@@ -11,23 +11,8 @@ async function getCurrentUserId(): Promise<string | null> {
   return session?.user?.id ?? null;
 }
 
-// ── Entry parsing ──
-
-export function parseEntryPrefix(raw: string): { type: EntryType; content: string } {
-  const trimmed = raw.trim();
-  if (trimmed.startsWith('- ')) return { type: 'note', content: trimmed.slice(2) };
-  if (trimmed.startsWith('* ')) return { type: 'event', content: trimmed.slice(2) };
-  return { type: 'task', content: trimmed };
-}
-
-export const bulletSymbol: Record<EntryType, string> = {
-  task: '●',
-  event: '○',
-  note: '–',
-};
-
-export const statusSymbol: Record<EntryStatus, string> = {
-  open: '',
+// Re-export utilities from non-server file
+export { parseEntryPrefix, bulletSymbol, statusSymbol } from './entries-utils';
   done: '×',
   migrated: '>',
   cancelled: '',
