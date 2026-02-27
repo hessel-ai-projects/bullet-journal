@@ -11,9 +11,6 @@ async function getCurrentUserId(): Promise<string | null> {
   return session?.user?.id ?? null;
 }
 
-// Re-export utilities from non-server file
-export { parseEntryPrefix, bulletSymbol, statusSymbol } from './entries-utils';
-
 // ── Fetch helpers ──
 
 export async function fetchEntriesForDate(date: string): Promise<Entry[]> {

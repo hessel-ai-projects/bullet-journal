@@ -35,11 +35,10 @@ import {
 import {
   updateEntry,
   deleteEntry,
-  parseEntryPrefix,
-  bulletSymbol,
   completeEntry,
   cancelEntry,
 } from '@/lib/entries';
+import { parseEntryPrefix, bulletSymbol } from '@/lib/entries-utils';
 import type { EntryStatus } from '@/lib/types';
 
 export function CustomCollection({ collectionId }: { collectionId: string }) {

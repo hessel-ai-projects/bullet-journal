@@ -24,13 +24,13 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import {
-  bulletSymbol,
   fetchFutureEntries,
   createEntry,
   deleteEntryWithSync,
   completeEntry,
   cancelEntry,
 } from '@/lib/entries';
+import { parseEntryPrefix, bulletSymbol } from '@/lib/entries-utils';
 
 function getCurrentAnd6Months() {
   const months: { year: number; month: number; label: string; dateStr: string }[] = [];

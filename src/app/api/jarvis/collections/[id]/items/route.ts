@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServiceClient } from '@/lib/supabase/server';
+import { db, entries } from '@/lib/db';
+import { eq, and, asc } from 'drizzle-orm';
 import { validateJarvisAuth, requireUserId } from '@/lib/jarvis-auth';
+import type { EntryType, EntryStatus } from '@/lib/types';
 
 export async function GET(
   request: NextRequest,
@@ -12,20 +14,23 @@ export async function GET(
   const result = requireUserId(request);
   if ('error' in result) return result.error;
 
-  const supabase = createServiceClient();
+  try {
+    const data = await db.query.entries.findMany({
+      where: and(
+        eq(entries.userId, result.userId),
+        eq(entries.collectionId, params.id),
+        eq(entries.logType, 'collection')
+      ),
+      orderBy: asc(entries.position),
+    });
 
-  const { data, error } = await supabase
-    .from('entries')
-    .select('*')
-    .eq('collection_id', params.id)
-    .eq('user_id', result.userId)
-    .order('position', { ascending: true });
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ data: data.map(mapEntryFromDb) });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Unknown error' },
+      { status: 500 }
+    );
   }
-
-  return NextResponse.json({ data });
 }
 
 export async function POST(
@@ -38,24 +43,54 @@ export async function POST(
   const result = requireUserId(request);
   if ('error' in result) return result.error;
 
-  const body = await request.json();
-  const supabase = createServiceClient();
+  try {
+    const body = await request.json();
+    const today = new Date().toISOString().split('T')[0];
 
-  const { data, error } = await supabase
-    .from('entries')
-    .insert({
-      ...body,
-      user_id: result.userId,
-      collection_id: params.id,
-      log_type: 'collection',
+    const [data] = await db.insert(entries).values({
+      userId: result.userId,
+      type: body.type as EntryType,
+      content: body.content,
+      logType: 'collection',
+      collectionId: params.id,
+      date: body.date ?? today,
+      position: body.position ?? 0,
+      status: body.status ?? 'open',
+      tags: body.tags ?? [],
       source: 'jarvis',
-    })
-    .select()
-    .single();
+      taskUid: crypto.randomUUID(),
+    }).returning();
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!data) {
+      return NextResponse.json({ error: 'Failed to create entry' }, { status: 500 });
+    }
+
+    return NextResponse.json({ data: mapEntryFromDb(data) }, { status: 201 });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Unknown error' },
+      { status: 500 }
+    );
   }
+}
 
-  return NextResponse.json({ data }, { status: 201 });
+function mapEntryFromDb(dbEntry: typeof entries.$inferSelect) {
+  return {
+    id: dbEntry.id,
+    user_id: dbEntry.userId,
+    type: dbEntry.type,
+    content: dbEntry.content,
+    status: dbEntry.status,
+    log_type: dbEntry.logType,
+    collection_id: dbEntry.collectionId,
+    date: dbEntry.date,
+    monthly_id: dbEntry.monthlyId,
+    task_uid: dbEntry.taskUid,
+    tags: dbEntry.tags ?? [],
+    position: dbEntry.position ?? 0,
+    google_event_id: dbEntry.googleEventId,
+    source: dbEntry.source,
+    created_at: dbEntry.createdAt.toISOString(),
+    updated_at: dbEntry.updatedAt.toISOString(),
+  };
 }

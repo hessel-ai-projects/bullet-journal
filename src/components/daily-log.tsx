@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -31,6 +30,8 @@ import {
 import {
   parseEntryPrefix,
   bulletSymbol,
+} from '@/lib/entries-utils';
+import {
   createEntry,
   updateEntry,
   updateEntryWithSync,

@@ -32,14 +32,14 @@ import {
   createMeetingNote,
   updateMeetingNote,
   deleteMeetingNote,
-} from '@/lib/meetings';
+} from '@/lib/meeting-notes';
 import {
   fetchCollectionByType,
   fetchActionItems,
   createActionItem,
 } from '@/lib/collections';
 import { updateEntry, deleteEntry, createEntry } from '@/lib/entries';
-import { bulletSymbol } from '@/lib/entries';
+import { parseEntryPrefix, bulletSymbol } from '@/lib/entries-utils';
 import type { EntryStatus } from '@/lib/types';
 
 function formatDate(d: string) {
