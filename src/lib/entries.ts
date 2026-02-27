@@ -13,10 +13,6 @@ async function getCurrentUserId(): Promise<string | null> {
 
 // Re-export utilities from non-server file
 export { parseEntryPrefix, bulletSymbol, statusSymbol } from './entries-utils';
-  done: '×',
-  migrated: '>',
-  cancelled: '',
-};
 
 // ── Fetch helpers ──
 
