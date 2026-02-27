@@ -272,12 +272,12 @@ export function MeetingNotes() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [notes, col] = await Promise.all([
-      fetchMeetingNotes(),
-      fetchCollectionByType('meetings'),
-    ]);
-    setMeetings(notes);
+    const col = await fetchCollectionByType('meetings');
     setCollection(col);
+    if (col) {
+      const notes = await fetchMeetingNotes(col.id);
+      setMeetings(notes);
+    }
     setLoading(false);
   }, []);
 
