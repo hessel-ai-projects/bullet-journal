@@ -1,7 +1,17 @@
-import { createClient } from '@/lib/supabase/client';
+'use server';
+
+import { db, entries, profiles } from '@/lib/db';
+import { eq, and, gte, lte, lt, gt, inArray, desc, asc, sql, ne } from 'drizzle-orm';
+import { auth } from '@/auth';
 import type { Entry, EntryType, EntryStatus } from '@/lib/types';
 
-const supabase = () => createClient();
+// Helper to get current user ID from session
+async function getCurrentUserId(): Promise<string | null> {
+  const session = await auth();
+  return session?.user?.id ?? null;
+}
+
+// ── Entry parsing ──
 
 export function parseEntryPrefix(raw: string): { type: EntryType; content: string } {
   const trimmed = raw.trim();
@@ -26,29 +36,40 @@ export const statusSymbol: Record<EntryStatus, string> = {
 // ── Fetch helpers ──
 
 export async function fetchEntriesForDate(date: string): Promise<Entry[]> {
-  const { data } = await supabase()
-    .from('entries')
-    .select('*')
-    .eq('log_type', 'daily')
-    .eq('date', date)
-    .order('position', { ascending: true });
-  return (data ?? []) as Entry[];
+  const userId = await getCurrentUserId();
+  if (!userId) return [];
+
+  const data = await db.query.entries.findMany({
+    where: and(
+      eq(entries.userId, userId),
+      eq(entries.logType, 'daily'),
+      eq(entries.date, date)
+    ),
+    orderBy: asc(entries.position),
+  });
+
+  return data.map(mapEntryFromDb);
 }
 
 export async function fetchEntriesForMonth(year: number, month: number): Promise<Entry[]> {
+  const userId = await getCurrentUserId();
+  if (!userId) return [];
+
   const start = `${year}-${String(month).padStart(2, '0')}-01`;
   const endDate = new Date(year, month, 0);
   const end = `${year}-${String(month).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}`;
-  
-  const { data } = await supabase()
-    .from('entries')
-    .select('*')
-    .eq('log_type', 'daily')
-    .gte('date', start)
-    .lte('date', end)
-    .order('date', { ascending: true })
-    .order('position', { ascending: true });
-  return (data ?? []) as Entry[];
+
+  const data = await db.query.entries.findMany({
+    where: and(
+      eq(entries.userId, userId),
+      eq(entries.logType, 'daily'),
+      gte(entries.date, start),
+      lte(entries.date, end)
+    ),
+    orderBy: [asc(entries.date), asc(entries.position)],
+  });
+
+  return data.map(mapEntryFromDb);
 }
 
 /**
@@ -56,43 +77,63 @@ export async function fetchEntriesForMonth(year: number, month: number): Promise
  * Queries log_type IN ['monthly', 'future'] — both appear in the monthly panel.
  */
 export async function fetchMonthlyEntries(year: number, month: number): Promise<Entry[]> {
+  const userId = await getCurrentUserId();
+  if (!userId) return [];
+
   const monthStr = `${year}-${String(month).padStart(2, '0')}`;
   const start = `${monthStr}-01`;
   const endDate = new Date(year, month, 0);
   const end = `${monthStr}-${String(endDate.getDate()).padStart(2, '0')}`;
-  const { data } = await supabase()
-    .from('entries')
-    .select('*')
-    .in('log_type', ['monthly', 'future'])
-    .gte('date', start)
-    .lte('date', end)
-    .order('position', { ascending: true });
-  return (data ?? []) as Entry[];
+
+  const data = await db.query.entries.findMany({
+    where: and(
+      eq(entries.userId, userId),
+      inArray(entries.logType, ['monthly', 'future']),
+      gte(entries.date, start),
+      lte(entries.date, end)
+    ),
+    orderBy: asc(entries.position),
+  });
+
+  return data.map(mapEntryFromDb);
 }
 
 /**
  * Fetch future log entries. Queries log_type IN ['future', 'monthly'].
  */
 export async function fetchFutureEntries(): Promise<Entry[]> {
+  const userId = await getCurrentUserId();
+  if (!userId) return [];
+
   const now = new Date();
   const currentMonthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-  const { data } = await supabase()
-    .from('entries')
-    .select('*')
-    .in('log_type', ['future', 'monthly'])
-    .gte('date', currentMonthStart)
-    .order('date', { ascending: true })
-    .order('position', { ascending: true });
-  return (data ?? []) as Entry[];
+
+  const data = await db.query.entries.findMany({
+    where: and(
+      eq(entries.userId, userId),
+      inArray(entries.logType, ['future', 'monthly']),
+      gte(entries.date, currentMonthStart)
+    ),
+    orderBy: [asc(entries.date), asc(entries.position)],
+  });
+
+  return data.map(mapEntryFromDb);
 }
 
 export async function fetchAssignedDays(monthlyEntryId: string): Promise<string[]> {
-  const { data } = await supabase()
-    .from('entries')
-    .select('date')
-    .eq('monthly_id', monthlyEntryId)
-    .eq('log_type', 'daily');
-  return (data ?? []).map((d: { date: string }) => d.date);
+  const userId = await getCurrentUserId();
+  if (!userId) return [];
+
+  const data = await db.query.entries.findMany({
+    where: and(
+      eq(entries.userId, userId),
+      eq(entries.monthlyId, monthlyEntryId),
+      eq(entries.logType, 'daily')
+    ),
+    columns: { date: true },
+  });
+
+  return data.map(d => d.date);
 }
 
 /**
@@ -101,32 +142,42 @@ export async function fetchAssignedDays(monthlyEntryId: string): Promise<string[
  * Only tasks, only open status, only log_type IN ['monthly', 'future'].
  */
 export async function fetchUnassignedMonthlyTasks(year: number, month: number): Promise<Entry[]> {
+  const userId = await getCurrentUserId();
+  if (!userId) return [];
+
   const monthStr = `${year}-${String(month).padStart(2, '0')}`;
   const start = `${monthStr}-01`;
   const endDate = new Date(year, month, 0);
   const end = `${monthStr}-${String(endDate.getDate()).padStart(2, '0')}`;
-  
-  const { data: monthlyTasks } = await supabase()
-    .from('entries')
-    .select('*')
-    .in('log_type', ['monthly', 'future'])
-    .eq('type', 'task')
-    .eq('status', 'open')
-    .gte('date', start)
-    .lte('date', end)
-    .order('position', { ascending: true });
 
-  if (!monthlyTasks || monthlyTasks.length === 0) return [];
+  const monthlyTasks = await db.query.entries.findMany({
+    where: and(
+      eq(entries.userId, userId),
+      inArray(entries.logType, ['monthly', 'future']),
+      eq(entries.type, 'task'),
+      eq(entries.status, 'open'),
+      gte(entries.date, start),
+      lte(entries.date, end)
+    ),
+    orderBy: asc(entries.position),
+  });
+
+  if (monthlyTasks.length === 0) return [];
 
   const ids = monthlyTasks.map(t => t.id);
-  const { data: children } = await supabase()
-    .from('entries')
-    .select('monthly_id')
-    .in('monthly_id', ids)
-    .eq('log_type', 'daily');
+  
+  // Find which ones have children
+  const children = await db.query.entries.findMany({
+    where: and(
+      eq(entries.userId, userId),
+      inArray(entries.monthlyId, ids),
+      eq(entries.logType, 'daily')
+    ),
+    columns: { monthlyId: true },
+  });
 
-  const assignedIds = new Set((children ?? []).map(c => c.monthly_id));
-  return monthlyTasks.filter(t => !assignedIds.has(t.id)) as Entry[];
+  const assignedIds = new Set(children.map(c => c.monthlyId));
+  return monthlyTasks.filter(t => !assignedIds.has(t.id)).map(mapEntryFromDb);
 }
 
 /**
@@ -135,30 +186,44 @@ export async function fetchUnassignedMonthlyTasks(year: number, month: number): 
  */
 export async function fetchChainResolutions(taskUids: string[]): Promise<Record<string, EntryStatus>> {
   if (taskUids.length === 0) return {};
-  const { data } = await supabase()
-    .from('entries')
-    .select('task_uid, status')
-    .in('task_uid', taskUids)
-    .in('status', ['done', 'cancelled']);
+
+  const userId = await getCurrentUserId();
+  if (!userId) return {};
+
+  const data = await db.query.entries.findMany({
+    where: and(
+      eq(entries.userId, userId),
+      inArray(entries.taskUid, taskUids),
+      inArray(entries.status, ['done', 'cancelled'])
+    ),
+    columns: { taskUid: true, status: true },
+  });
+
   const map: Record<string, EntryStatus> = {};
-  for (const row of (data ?? [])) {
-    if (row.task_uid && !map[row.task_uid]) {
-      map[row.task_uid] = row.status as EntryStatus;
+  for (const row of data) {
+    if (row.taskUid && !map[row.taskUid]) {
+      map[row.taskUid] = row.status as EntryStatus;
     }
   }
   return map;
 }
 
 export async function fetchIncompleteFromPast(beforeDate: string): Promise<Entry[]> {
-  const { data } = await supabase()
-    .from('entries')
-    .select('*')
-    .eq('log_type', 'daily')
-    .eq('type', 'task')
-    .eq('status', 'open')
-    .lt('date', beforeDate)
-    .order('date', { ascending: true });
-  return (data ?? []) as Entry[];
+  const userId = await getCurrentUserId();
+  if (!userId) return [];
+
+  const data = await db.query.entries.findMany({
+    where: and(
+      eq(entries.userId, userId),
+      eq(entries.logType, 'daily'),
+      eq(entries.type, 'task'),
+      eq(entries.status, 'open'),
+      lt(entries.date, beforeDate)
+    ),
+    orderBy: asc(entries.date),
+  });
+
+  return data.map(mapEntryFromDb);
 }
 
 // ── CRUD helpers ──
@@ -176,8 +241,8 @@ export async function createEntry(params: {
   monthly_id?: string | null;
   task_uid?: string | null;
 }): Promise<Entry | null> {
-  const { data: { user } } = await supabase().auth.getUser();
-  if (!user) return null;
+  const userId = await getCurrentUserId();
+  if (!userId) return null;
 
   let monthlyId = params.monthly_id ?? null;
   let taskUid = params.task_uid ?? null;
@@ -191,66 +256,66 @@ export async function createEntry(params: {
     // Generate a shared task_uid for the chain
     const sharedUid = crypto.randomUUID();
 
-    const { data: monthlyEntry, error: monthlyError } = await supabase()
-      .from('entries')
-      .insert({
-        user_id: user.id,
-        type: 'task',
-        content: params.content,
-        log_type: 'monthly',
-        date: params.date,
-        position: existingMonthly.length,
-        status: 'open',
-        task_uid: sharedUid,
-      })
-      .select()
-      .single();
+    const [monthlyEntry] = await db.insert(entries).values({
+      userId,
+      type: 'task',
+      content: params.content,
+      logType: 'monthly',
+      date: params.date,
+      position: existingMonthly.length,
+      status: 'open',
+      taskUid: sharedUid,
+    }).returning();
 
-    if (!monthlyError && monthlyEntry) {
+    if (monthlyEntry) {
       monthlyId = monthlyEntry.id;
       taskUid = sharedUid;
     }
   }
 
-  const insertData: Record<string, unknown> = {
-    user_id: user.id,
+  const insertData: typeof entries.$inferInsert = {
+    userId,
     type: params.type,
     content: params.content,
-    log_type: params.log_type,
+    logType: params.log_type as 'daily' | 'monthly' | 'future' | 'collection',
     date: params.date,
     position: params.position,
-    monthly_id: monthlyId,
+    monthlyId,
   };
 
   // Set task_uid if provided (from migration or D23), otherwise let DB default
   if (taskUid) {
-    insertData.task_uid = taskUid;
+    insertData.taskUid = taskUid;
   }
 
-  const { data, error } = await supabase()
-    .from('entries')
-    .insert(insertData)
-    .select()
-    .single();
+  const [data] = await db.insert(entries).values(insertData).returning();
   
-  if (error) return null;
-  return data as Entry;
+  if (!data) return null;
+  return mapEntryFromDb(data);
 }
 
 export async function updateEntry(id: string, updates: Partial<Entry>): Promise<boolean> {
-  const { error } = await supabase()
-    .from('entries')
-    .update(updates)
-    .eq('id', id);
-  return !error;
+  const userId = await getCurrentUserId();
+  if (!userId) return false;
+
+  const result = await db.update(entries)
+    .set({
+      ...updates,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(entries.id, id), eq(entries.userId, userId)));
+
+  return result.rowCount !== null && result.rowCount > 0;
 }
 
 export async function deleteEntry(id: string): Promise<boolean> {
-  const { error } = await supabase()
-    .from('entries')
-    .delete()
-    .eq('id', id);
-  return !error;
+  const userId = await getCurrentUserId();
+  if (!userId) return false;
+
+  const result = await db.delete(entries)
+    .where(and(eq(entries.id, id), eq(entries.userId, userId)));
+
+  return result.rowCount !== null && result.rowCount > 0;
 }
 
 /**
@@ -258,21 +323,21 @@ export async function deleteEntry(id: string): Promise<boolean> {
  * One delete kills the entire history across all months.
  */
 export async function deleteEntryWithSync(id: string): Promise<boolean> {
-  const { data: entry } = await supabase()
-    .from('entries')
-    .select('id, task_uid')
-    .eq('id', id)
-    .single();
+  const userId = await getCurrentUserId();
+  if (!userId) return false;
+
+  const entry = await db.query.entries.findFirst({
+    where: and(eq(entries.id, id), eq(entries.userId, userId)),
+    columns: { id: true, taskUid: true },
+  });
 
   if (!entry) return false;
 
   // Nuclear delete: all entries with the same task_uid
-  const { error } = await supabase()
-    .from('entries')
-    .delete()
-    .eq('task_uid', entry.task_uid);
+  await db.delete(entries)
+    .where(and(eq(entries.taskUid, entry.taskUid), eq(entries.userId, userId)));
 
-  return !error;
+  return true;
 }
 
 /**
@@ -280,11 +345,13 @@ export async function deleteEntryWithSync(id: string): Promise<boolean> {
  * Migrated entries are read-only.
  */
 export async function updateEntryWithSync(id: string, updates: Partial<Entry>): Promise<boolean> {
-  const { data: entry } = await supabase()
-    .from('entries')
-    .select('id, monthly_id, status')
-    .eq('id', id)
-    .single();
+  const userId = await getCurrentUserId();
+  if (!userId) return false;
+
+  const entry = await db.query.entries.findFirst({
+    where: and(eq(entries.id, id), eq(entries.userId, userId)),
+    columns: { id: true, monthlyId: true, status: true },
+  });
 
   if (!entry) return false;
   if (entry.status === 'migrated') return false;
@@ -292,35 +359,40 @@ export async function updateEntryWithSync(id: string, updates: Partial<Entry>): 
   const ok = await updateEntry(id, updates);
   if (!ok) return false;
 
-  const syncFields: Partial<Entry> = {};
+  const syncFields: Partial<typeof entries.$inferInsert> = {};
   if (updates.content !== undefined) syncFields.content = updates.content;
   if (updates.type !== undefined) syncFields.type = updates.type;
 
   if (Object.keys(syncFields).length === 0) return true;
 
   // Sync to monthly parent
-  if (entry.monthly_id) {
-    const { data: parent } = await supabase()
-      .from('entries')
-      .select('status')
-      .eq('id', entry.monthly_id)
-      .single();
+  if (entry.monthlyId) {
+    const parent = await db.query.entries.findFirst({
+      where: and(eq(entries.id, entry.monthlyId), eq(entries.userId, userId)),
+      columns: { id: true, status: true },
+    });
     if (parent && parent.status !== 'migrated') {
-      await updateEntry(entry.monthly_id, syncFields);
+      await db.update(entries)
+        .set({ ...syncFields, updatedAt: new Date() })
+        .where(and(eq(entries.id, parent.id), eq(entries.userId, userId)));
     }
   }
 
   // Sync to non-migrated daily children
-  const { data: children } = await supabase()
-    .from('entries')
-    .select('id, status')
-    .eq('monthly_id', id);
+  const children = await db.query.entries.findMany({
+    where: and(
+      eq(entries.userId, userId),
+      eq(entries.monthlyId, id),
+      eq(entries.logType, 'daily')
+    ),
+    columns: { id: true, status: true },
+  });
 
-  if (children) {
-    for (const child of children) {
-      if (child.status !== 'migrated') {
-        await updateEntry(child.id, syncFields);
-      }
+  for (const child of children) {
+    if (child.status !== 'migrated') {
+      await db.update(entries)
+        .set({ ...syncFields, updatedAt: new Date() })
+        .where(and(eq(entries.id, child.id), eq(entries.userId, userId)));
     }
   }
 
@@ -342,54 +414,49 @@ export async function cancelEntry(id: string): Promise<boolean> {
  * Creates daily child with same task_uid. Does NOT change monthly parent status.
  */
 export async function planToDay(monthlyEntryId: string, date: string): Promise<Entry | null> {
-  const { data: existingChildren } = await supabase()
-    .from('entries')
-    .select('*')
-    .eq('monthly_id', monthlyEntryId)
-    .eq('log_type', 'daily')
-    .neq('status', 'migrated');
+  const userId = await getCurrentUserId();
+  if (!userId) return null;
 
-  if (existingChildren && existingChildren.length > 0) {
+  // Check for existing non-migrated children
+  const existingChildren = await db.query.entries.findMany({
+    where: and(
+      eq(entries.userId, userId),
+      eq(entries.monthlyId, monthlyEntryId),
+      eq(entries.logType, 'daily'),
+      ne(entries.status, 'migrated')
+    ),
+  });
+
+  if (existingChildren.length > 0) {
     const child = existingChildren[0];
-    const ok = await updateEntry(child.id, { date });
-    if (ok) {
-      await updateEntry(monthlyEntryId, { date });
-      return { ...child, date } as Entry;
-    }
-    return null;
+    await updateEntry(child.id, { date });
+    await updateEntry(monthlyEntryId, { date });
+    return { ...mapEntryFromDb(child), date };
   }
 
-  const { data: monthly } = await supabase()
-    .from('entries')
-    .select('*')
-    .eq('id', monthlyEntryId)
-    .single();
+  const monthly = await db.query.entries.findFirst({
+    where: and(eq(entries.id, monthlyEntryId), eq(entries.userId, userId)),
+  });
 
   if (!monthly) return null;
 
   const existing = await fetchEntriesForDate(date);
-  const { data: { user } } = await supabase().auth.getUser();
-  if (!user) return null;
 
-  const { data: dailyEntry, error } = await supabase()
-    .from('entries')
-    .insert({
-      user_id: user.id,
-      type: monthly.type,
-      content: monthly.content,
-      log_type: 'daily',
-      date,
-      position: existing.length,
-      monthly_id: monthlyEntryId,
-      task_uid: monthly.task_uid,  // same chain
-    })
-    .select()
-    .single();
+  const [dailyEntry] = await db.insert(entries).values({
+    userId,
+    type: monthly.type,
+    content: monthly.content,
+    logType: 'daily',
+    date,
+    position: existing.length,
+    monthlyId: monthlyEntryId,
+    taskUid: monthly.taskUid,  // same chain
+  }).returning();
 
-  if (error) return null;
+  if (!dailyEntry) return null;
 
   await updateEntry(monthlyEntryId, { date });
-  return dailyEntry as Entry;
+  return mapEntryFromDb(dailyEntry);
 }
 
 // ── Migration helpers ──
@@ -399,11 +466,12 @@ export async function planToDay(monthlyEntryId: string, date: string): Promise<E
  * All entries share the same task_uid throughout.
  */
 export async function migrateEntry(id: string, newDate: string): Promise<Entry | null> {
-  const { data: original } = await supabase()
-    .from('entries')
-    .select('*')
-    .eq('id', id)
-    .single();
+  const userId = await getCurrentUserId();
+  if (!userId) return null;
+
+  const original = await db.query.entries.findFirst({
+    where: and(eq(entries.id, id), eq(entries.userId, userId)),
+  });
 
   if (!original) return null;
 
@@ -415,77 +483,71 @@ export async function migrateEntry(id: string, newDate: string): Promise<Entry |
     return migrateToMonth(id, targetMonthDate);
   }
 
-  const monthlyId = original.monthly_id;
+  const monthlyId = original.monthlyId;
   if (!monthlyId) {
     console.warn('migrateEntry: daily task without monthly_id', id);
     return null;
   }
 
   // Step 1: Check if a peer exists at target date
-  const { data: peerAtTarget } = await supabase()
-    .from('entries')
-    .select('*')
-    .eq('monthly_id', monthlyId)
-    .eq('log_type', 'daily')
-    .eq('date', newDate)
-    .single();
+  const peerAtTarget = await db.query.entries.findFirst({
+    where: and(
+      eq(entries.userId, userId),
+      eq(entries.monthlyId, monthlyId),
+      eq(entries.logType, 'daily'),
+      eq(entries.date, newDate)
+    ),
+  });
 
   let result: Entry;
 
   if (peerAtTarget) {
     await updateEntry(peerAtTarget.id, { status: 'open' });
-    result = { ...peerAtTarget, status: 'open' } as Entry;
+    result = { ...mapEntryFromDb(peerAtTarget), status: 'open' };
   } else {
     const existing = await fetchEntriesForDate(newDate);
-    const { data: { user } } = await supabase().auth.getUser();
-    if (!user) return null;
 
-    const { data: newEntry, error } = await supabase()
-      .from('entries')
-      .insert({
-        user_id: user.id,
-        type: original.type,
-        content: original.content,
-        log_type: 'daily',
-        date: newDate,
-        position: existing.length,
-        monthly_id: monthlyId,
-        task_uid: original.task_uid,  // same chain
-      })
-      .select()
-      .single();
+    const [newEntry] = await db.insert(entries).values({
+      userId,
+      type: original.type,
+      content: original.content,
+      logType: 'daily',
+      date: newDate,
+      position: existing.length,
+      monthlyId,
+      taskUid: original.taskUid,  // same chain
+    }).returning();
 
-    if (error || !newEntry) return null;
-    result = newEntry as Entry;
+    if (!newEntry) return null;
+    result = mapEntryFromDb(newEntry);
   }
 
   // Step 2: Delete all peers with dates AFTER target date
-  await supabase()
-    .from('entries')
-    .delete()
-    .eq('monthly_id', monthlyId)
-    .eq('log_type', 'daily')
-    .gt('date', newDate)
-    .neq('id', result.id);
+  await db.delete(entries)
+    .where(and(
+      eq(entries.userId, userId),
+      eq(entries.monthlyId, monthlyId),
+      eq(entries.logType, 'daily'),
+      gt(entries.date, newDate),
+      ne(entries.id, result.id)
+    ));
 
   // Step 3: Mark source as migrated if it still exists
   if (original.id !== result.id && original.date < newDate) {
-    const { data: sourceStillExists } = await supabase()
-      .from('entries')
-      .select('id')
-      .eq('id', original.id)
-      .single();
+    const sourceStillExists = await db.query.entries.findFirst({
+      where: and(eq(entries.id, original.id), eq(entries.userId, userId)),
+      columns: { id: true },
+    });
     if (sourceStillExists) {
       await updateEntry(original.id, { status: 'migrated' });
     }
   } else if (original.id !== result.id && original.date >= newDate) {
-    const { data: sourceStillExists } = await supabase()
-      .from('entries')
-      .select('id')
-      .eq('id', original.id)
-      .single();
+    const sourceStillExists = await db.query.entries.findFirst({
+      where: and(eq(entries.id, original.id), eq(entries.userId, userId)),
+      columns: { id: true },
+    });
     if (sourceStillExists) {
-      await supabase().from('entries').delete().eq('id', original.id);
+      await deleteEntry(original.id);
     }
   }
 
@@ -500,78 +562,81 @@ export async function migrateEntry(id: string, newDate: string): Promise<Entry |
  * Marks old chain as migrated. Creates new monthly entry with SAME task_uid.
  */
 export async function migrateToMonth(entryId: string, targetMonthDate: string): Promise<Entry | null> {
-  const { data: original } = await supabase()
-    .from('entries')
-    .select('*')
-    .eq('id', entryId)
-    .single();
+  const userId = await getCurrentUserId();
+  if (!userId) return null;
+
+  const original = await db.query.entries.findFirst({
+    where: and(eq(entries.id, entryId), eq(entries.userId, userId)),
+  });
 
   if (!original) return null;
 
-  const monthlyId = original.monthly_id;
+  const monthlyId = original.monthlyId;
 
   if (monthlyId) {
     // Daily entry — mark all peers + self as migrated
-    await supabase()
-      .from('entries')
-      .update({ status: 'migrated' })
-      .eq('monthly_id', monthlyId)
-      .eq('log_type', 'daily');
+    await db.update(entries)
+      .set({ status: 'migrated', updatedAt: new Date() })
+      .where(and(
+        eq(entries.userId, userId),
+        eq(entries.monthlyId, monthlyId),
+        eq(entries.logType, 'daily')
+      ));
     await updateEntry(monthlyId, { status: 'migrated' });
-  } else if (original.log_type === 'monthly' || original.log_type === 'future') {
+  } else if (original.logType === 'monthly' || original.logType === 'future') {
     // Monthly/future entry — mark children as migrated
-    await supabase()
-      .from('entries')
-      .update({ status: 'migrated' })
-      .eq('monthly_id', original.id)
-      .eq('log_type', 'daily');
+    await db.update(entries)
+      .set({ status: 'migrated', updatedAt: new Date() })
+      .where(and(
+        eq(entries.userId, userId),
+        eq(entries.monthlyId, original.id),
+        eq(entries.logType, 'daily')
+      ));
     await updateEntry(entryId, { status: 'migrated' });
   } else {
     await updateEntry(entryId, { status: 'migrated' });
   }
-
-  const { data: { user } } = await supabase().auth.getUser();
-  if (!user) return null;
 
   const targetYear = parseInt(targetMonthDate.slice(0, 4));
   const targetMonth = parseInt(targetMonthDate.slice(5, 7));
   const existingInTarget = await fetchMonthlyEntries(targetYear, targetMonth);
 
   // New monthly entry: same task_uid, unlinked (no monthly_id), YYYY-MM-01
-  const { data: newEntry, error } = await supabase()
-    .from('entries')
-    .insert({
-      user_id: user.id,
-      type: original.type,
-      content: original.content,
-      log_type: 'monthly',
-      date: targetMonthDate.slice(0, 7) + '-01',
-      position: existingInTarget.length,
-      status: 'open',
-      task_uid: original.task_uid,  // SAME chain — never breaks
-    })
-    .select()
-    .single();
+  const [newEntry] = await db.insert(entries).values({
+    userId,
+    type: original.type,
+    content: original.content,
+    logType: 'monthly',
+    date: targetMonthDate.slice(0, 7) + '-01',
+    position: existingInTarget.length,
+    status: 'open',
+    taskUid: original.taskUid,  // SAME chain — never breaks
+  }).returning();
 
-  if (error) return null;
-  return newEntry as Entry;
+  if (!newEntry) return null;
+  return mapEntryFromDb(newEntry);
 }
 
 /**
  * Migrate all incomplete past tasks to today.
  */
 export async function migrateAllIncomplete(fromBefore: string, toDate: string): Promise<number> {
-  const { data: incomplete } = await supabase()
-    .from('entries')
-    .select('*')
-    .eq('log_type', 'daily')
-    .eq('type', 'task')
-    .eq('status', 'open')
-    .lt('date', fromBefore)
-    .order('date', { ascending: true });
-  
-  if (!incomplete || incomplete.length === 0) return 0;
-  
+  const userId = await getCurrentUserId();
+  if (!userId) return 0;
+
+  const incomplete = await db.query.entries.findMany({
+    where: and(
+      eq(entries.userId, userId),
+      eq(entries.logType, 'daily'),
+      eq(entries.type, 'task'),
+      eq(entries.status, 'open'),
+      lt(entries.date, fromBefore)
+    ),
+    orderBy: asc(entries.date),
+  });
+
+  if (incomplete.length === 0) return 0;
+
   let count = 0;
   for (const entry of incomplete) {
     const result = await migrateEntry(entry.id, toDate);
@@ -583,41 +648,50 @@ export async function migrateAllIncomplete(fromBefore: string, toDate: string): 
 // ── Bidirectional sync ──
 
 export async function syncStatusToParent(dailyEntryId: string, newStatus: EntryStatus): Promise<boolean> {
-  const { data: daily } = await supabase()
-    .from('entries')
-    .select('monthly_id')
-    .eq('id', dailyEntryId)
-    .single();
+  const userId = await getCurrentUserId();
+  if (!userId) return false;
 
-  if (!daily?.monthly_id) return false;
+  const daily = await db.query.entries.findFirst({
+    where: and(eq(entries.id, dailyEntryId), eq(entries.userId, userId)),
+    columns: { monthlyId: true },
+  });
+
+  if (!daily?.monthlyId) return false;
 
   // Sync to all non-migrated peer dailies
-  const { data: peers } = await supabase()
-    .from('entries')
-    .select('id, status')
-    .eq('monthly_id', daily.monthly_id)
-    .eq('log_type', 'daily')
-    .neq('id', dailyEntryId);
+  const peers = await db.query.entries.findMany({
+    where: and(
+      eq(entries.userId, userId),
+      eq(entries.monthlyId, daily.monthlyId),
+      eq(entries.logType, 'daily'),
+      ne(entries.id, dailyEntryId)
+    ),
+    columns: { id: true, status: true },
+  });
 
-  if (peers) {
-    for (const peer of peers) {
-      if (peer.status !== 'migrated') {
-        await updateEntry(peer.id, { status: newStatus });
-      }
+  for (const peer of peers) {
+    if (peer.status !== 'migrated') {
+      await updateEntry(peer.id, { status: newStatus });
     }
   }
 
-  return updateEntry(daily.monthly_id, { status: newStatus });
+  return updateEntry(daily.monthlyId, { status: newStatus });
 }
 
 export async function syncStatusToChild(monthlyEntryId: string, newStatus: EntryStatus): Promise<boolean> {
-  const { data: children } = await supabase()
-    .from('entries')
-    .select('id, status')
-    .eq('monthly_id', monthlyEntryId)
-    .eq('log_type', 'daily');
+  const userId = await getCurrentUserId();
+  if (!userId) return false;
 
-  if (!children || children.length === 0) return false;
+  const children = await db.query.entries.findMany({
+    where: and(
+      eq(entries.userId, userId),
+      eq(entries.monthlyId, monthlyEntryId),
+      eq(entries.logType, 'daily')
+    ),
+    columns: { id: true, status: true },
+  });
+
+  if (children.length === 0) return false;
 
   let ok = true;
   for (const child of children) {
@@ -637,4 +711,27 @@ export async function assignMonthlyTaskToDay(
 ): Promise<Entry | null> {
   const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   return planToDay(monthlyEntry.id, dateStr);
+}
+
+// ── Helper to map DB entry to Entry type ──
+
+function mapEntryFromDb(dbEntry: typeof entries.$inferSelect): Entry {
+  return {
+    id: dbEntry.id,
+    user_id: dbEntry.userId,
+    type: dbEntry.type,
+    content: dbEntry.content,
+    status: dbEntry.status,
+    log_type: dbEntry.logType,
+    collection_id: dbEntry.collectionId,
+    date: dbEntry.date,
+    monthly_id: dbEntry.monthlyId,
+    task_uid: dbEntry.taskUid,
+    tags: dbEntry.tags ?? [],
+    position: dbEntry.position ?? 0,
+    google_event_id: dbEntry.googleEventId,
+    source: dbEntry.source,
+    created_at: dbEntry.createdAt.toISOString(),
+    updated_at: dbEntry.updatedAt.toISOString(),
+  };
 }

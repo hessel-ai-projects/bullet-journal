@@ -1,6 +1,6 @@
 'use client';
 
-import { createClient } from '@/lib/supabase/client';
+import { signIn } from 'next-auth/react';
 import { Button } from '@/components/ui/button';
 import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
@@ -10,14 +10,7 @@ function LoginForm() {
   const error = searchParams.get('error');
 
   const handleLogin = async () => {
-    const supabase = createClient();
-    await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-        scopes: 'openid email profile',
-      },
-    });
+    await signIn('google', { callbackUrl: '/' });
   };
 
   return (
@@ -33,7 +26,9 @@ function LoginForm() {
 
         {error && (
           <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive text-center">
-            Authentication failed. Please try again.
+            {error === 'AccessDenied' 
+              ? 'You are not authorized to access this application.'
+              : 'Authentication failed. Please try again.'}
           </div>
         )}
 

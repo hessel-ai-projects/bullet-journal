@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServiceClient } from '@/lib/supabase/server';
+import { db, collections } from '@/lib/db';
+import { eq, and, asc } from 'drizzle-orm';
 import { validateJarvisAuth, requireUserId } from '@/lib/jarvis-auth';
+import type { CollectionType } from '@/lib/types';
 
 export async function GET(request: NextRequest) {
   const authError = validateJarvisAuth(request);
@@ -9,19 +11,19 @@ export async function GET(request: NextRequest) {
   const result = requireUserId(request);
   if ('error' in result) return result.error;
 
-  const supabase = createServiceClient();
+  try {
+    const data = await db.query.collections.findMany({
+      where: eq(collections.userId, result.userId),
+      orderBy: asc(collections.createdAt),
+    });
 
-  const { data, error } = await supabase
-    .from('collections')
-    .select('*')
-    .eq('user_id', result.userId)
-    .order('created_at', { ascending: true });
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ data: data.map(mapCollectionFromDb) });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Unknown error' },
+      { status: 500 }
+    );
   }
-
-  return NextResponse.json({ data });
 }
 
 export async function POST(request: NextRequest) {
@@ -31,21 +33,38 @@ export async function POST(request: NextRequest) {
   const result = requireUserId(request);
   if ('error' in result) return result.error;
 
-  const body = await request.json();
-  const supabase = createServiceClient();
+  try {
+    const body = await request.json();
 
-  const { data, error } = await supabase
-    .from('collections')
-    .insert({
-      ...body,
-      user_id: result.userId,
-    })
-    .select()
-    .single();
+    const [data] = await db.insert(collections).values({
+      userId: result.userId,
+      name: body.name,
+      type: body.type as CollectionType,
+      icon: body.icon ?? '📋',
+      template: body.template,
+    }).returning();
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!data) {
+      return NextResponse.json({ error: 'Failed to create collection' }, { status: 500 });
+    }
+
+    return NextResponse.json({ data: mapCollectionFromDb(data) }, { status: 201 });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Unknown error' },
+      { status: 500 }
+    );
   }
+}
 
-  return NextResponse.json({ data }, { status: 201 });
+function mapCollectionFromDb(dbCollection: typeof collections.$inferSelect) {
+  return {
+    id: dbCollection.id,
+    user_id: dbCollection.userId,
+    name: dbCollection.name,
+    type: dbCollection.type,
+    icon: dbCollection.icon,
+    template: dbCollection.template,
+    created_at: dbCollection.createdAt.toISOString(),
+  };
 }
