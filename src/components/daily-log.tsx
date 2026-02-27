@@ -172,24 +172,6 @@ export function DailyLog({ initialEntries, date: initialDate }: DailyLogProps) {
     loadEntries(date);
   };
 
-  // Realtime subscription
-  useEffect(() => {
-    const supabase = createClient();
-    const channel = supabase
-      .channel('entries-daily')
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'entries',
-        filter: `date=eq.${date}`,
-      }, () => {
-        loadEntries(date);
-      })
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
-  }, [date, loadEntries]);
-
   const handleAdd = async () => {
     if (!input.trim()) return;
     const { type, content } = parseEntryPrefix(input);
