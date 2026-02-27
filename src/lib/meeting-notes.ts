@@ -45,8 +45,8 @@ export async function createMeetingNote(params: {
   date: string;
   title: string;
   attendees?: string[];
-  agenda?: string;
-  notes?: string;
+  agenda?: string | null;
+  notes?: string | null;
 }): Promise<MeetingNote | null> {
   const userId = await getCurrentUserId();
   if (!userId) return null;
