@@ -713,3 +713,4 @@ function mapEntryFromDb(dbEntry: typeof entries.$inferSelect): Entry {
     updated_at: dbEntry.updatedAt.toISOString(),
   };
 }
+// Trigger redeploy
