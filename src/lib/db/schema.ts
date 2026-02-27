@@ -1,5 +1,4 @@
 import { pgTable, uuid, text, date, integer, jsonb, timestamp, index, boolean } from 'drizzle-orm/pg-core';
-import { relations } from 'drizzle-orm';
 
 // ============================================================
 // Enums (as const arrays for type safety)
@@ -17,7 +16,6 @@ export const entrySourceEnum = ['user', 'jarvis', 'calendar'] as const;
 
 /**
  * Allowed users (invite-only whitelist)
- * Checked during Auth.js sign-in callback
  */
 export const allowedUsers = pgTable('allowed_users', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -27,8 +25,6 @@ export const allowedUsers = pgTable('allowed_users', {
 
 /**
  * User profiles
- * Linked to Auth.js users via id (which matches the auth provider's user id)
- * Created/updated in Auth.js callbacks
  */
 export const profiles = pgTable('profiles', {
   id: uuid('id').primaryKey(),
@@ -39,13 +35,10 @@ export const profiles = pgTable('profiles', {
   settings: jsonb('settings').default({ theme: 'dark', defaultView: 'daily' }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-}, (table) => ({
-  // No additional indexes needed - id is PK
-}));
+});
 
 /**
  * Collections (meetings, ideas, custom)
- * User-created containers for entries
  */
 export const collections = pgTable('collections', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -63,16 +56,6 @@ export const collections = pgTable('collections', {
 
 /**
  * Entries - Core bullet journal entries
- * 
- * CRITICAL RELATIONSHIPS:
- * - task_uid: Chain identity. ALL copies of a task share this (D23 parent+child, 
- *   migrations across months). NEVER breaks across copies.
- * - monthly_id: Within-month sync. Links daily entries to their monthly parent.
- *   NULL for monthly/future/collection entries.
- * 
- * NUCLEAR DELETE:
- * DELETE FROM entries WHERE task_uid = X
- * Kills entire chain across all months.
  */
 export const entries = pgTable('entries', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -85,14 +68,9 @@ export const entries = pgTable('entries', {
   logType: text('log_type', { enum: logTypeEnum }).notNull(),
   collectionId: uuid('collection_id').references(() => collections.id, { onDelete: 'set null' }),
   date: date('date').notNull(),
-  
-  // Monthly link: daily entries point to their monthly parent
-  // Only within-month, never cross-month
-  monthlyId: uuid('monthly_id').references(() => entries.id, { onDelete: 'cascade' }),
-  
-  // Chain identity: shared across ALL copies of a task (D23, migrations)
+  // Self-reference handled via relations
+  monthlyId: uuid('monthly_id'),
   taskUid: uuid('task_uid').notNull(),
-  
   tags: text('tags').array().default([]),
   position: integer('position').default(0),
   googleEventId: text('google_event_id'),
@@ -100,26 +78,15 @@ export const entries = pgTable('entries', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
-  // For daily log queries
   idxEntriesUserDate: index('idx_entries_user_date').on(table.userId, table.date),
-  
-  // For monthly/future log queries
   idxEntriesUserLogType: index('idx_entries_user_log_type').on(table.userId, table.logType),
-  
-  // For collection entries
   idxEntriesCollection: index('idx_entries_collection').on(table.collectionId),
-  
-  // CRITICAL: For nuclear delete and chain resolution
   idxEntriesTaskUid: index('idx_entries_task_uid').on(table.taskUid),
-  
-  // For bidirectional sync queries
   idxEntriesMonthlyId: index('idx_entries_monthly_id').on(table.monthlyId),
 }));
 
 /**
  * Meeting notes
- * Separate table for meeting-specific data
- * Action items stored as entries with tags=['meeting:<id>']
  */
 export const meetingNotes = pgTable('meeting_notes', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -142,58 +109,7 @@ export const meetingNotes = pgTable('meeting_notes', {
 }));
 
 // ============================================================
-// Relations
-// ============================================================
-
-export const profilesRelations = relations(profiles, ({ many }) => ({
-  entries: many(entries),
-  collections: many(collections),
-  meetingNotes: many(meetingNotes),
-}));
-
-export const collectionsRelations = relations(collections, ({ one, many }) => ({
-  user: one(profiles, {
-    fields: [collections.userId],
-    references: [profiles.id],
-  }),
-  entries: many(entries),
-  meetingNotes: many(meetingNotes),
-}));
-
-export const entriesRelations = relations(entries, ({ one, many }) => ({
-  user: one(profiles, {
-    fields: [entries.userId],
-    references: [profiles.id],
-  }),
-  collection: one(collections, {
-    fields: [entries.collectionId],
-    references: [collections.id],
-  }),
-  // Self-referential: daily entries point to monthly parent
-  monthlyParent: one(entries, {
-    fields: [entries.monthlyId],
-    references: [entries.id],
-    relationName: 'monthlyChildren',
-  }),
-  // Monthly entries have many daily children
-  dailyChildren: many(entries, {
-    relationName: 'monthlyChildren',
-  }),
-}));
-
-export const meetingNotesRelations = relations(meetingNotes, ({ one }) => ({
-  collection: one(collections, {
-    fields: [meetingNotes.collectionId],
-    references: [collections.id],
-  }),
-  user: one(profiles, {
-    fields: [meetingNotes.userId],
-    references: [profiles.id],
-  }),
-}));
-
-// ============================================================
-// Type Exports (for TypeScript)
+// Type Exports
 // ============================================================
 
 export type AllowedUser = typeof allowedUsers.$inferSelect;
